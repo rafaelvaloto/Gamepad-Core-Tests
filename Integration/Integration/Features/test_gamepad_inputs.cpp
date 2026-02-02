@@ -1,8 +1,6 @@
 ﻿// Copyright (c) 2025 Rafael Valoto. All Rights Reserved.
 #ifdef BUILD_GAMEPAD_CORE_TESTS
-#include "../../../Examples/Adapters/Tests/test_device_registry_policy.h"
-#include "GCore/Interfaces/IPlatformHardwareInfo.h"
-#include "GCore/Templates/TBasicDeviceRegistry.h"
+#include "test_utils.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include "GCore/Types/Structs/Context/InputContext.h"
 #include <chrono>
@@ -13,18 +11,6 @@
 #include <string_view>
 #include <thread>
 #include <vector>
-
-using TestDeviceRegistry = GamepadCore::TBasicDeviceRegistry<Ftest_device_registry_policy>;
-
-#if _WIN32
-#include "../../../Examples/Platform_Windows/test_windows_hardware_policy.h"
-using TestHardwarePolicy = Ftest_windows_platform::Ftest_windows_hardware_policy;
-using TestHardwareInfo = Ftest_windows_platform::Ftest_windows_hardware;
-#elif __unix__
-#include "../../../Examples/Platform_Linux/test_linux_hardware_policy.h"
-using TestHardwarePolicy = Ftest_linux_platform::Ftest_linux_hardware_policy;
-using TestHardwareInfo = Ftest_linux_platform::Ftest_linux_hardware;
-#endif
 
 int main(int argc, char* argv[])
 {
@@ -62,10 +48,9 @@ int main(int argc, char* argv[])
 
 	std::cout << "--- Gamepad Input Test ---" << std::endl;
 
-	auto HardwareImpl = std::make_unique<TestHardwareInfo>();
-	IPlatformHardwareInfo::SetInstance(std::move(HardwareImpl));
-
-	auto Registry = std::make_unique<TestDeviceRegistry>();
+	std::unique_ptr<IPlatformHardwareInfo> Hardware;
+	std::unique_ptr<test_utils::test_device_registry> Registry;
+	test_utils::initialize_test_environment(Hardware, Registry);
 
 	const int32_t TargetDeviceId = 0;
 	bool bWasConnected = false;

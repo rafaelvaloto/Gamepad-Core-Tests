@@ -1,7 +1,5 @@
 ﻿#ifdef BUILD_GAMEPAD_CORE_TESTS
-#include "../../../Examples/Adapters/Tests/test_device_registry_policy.h"
-#include "GCore/Interfaces/IPlatformHardwareInfo.h"
-#include "GCore/Templates/TBasicDeviceRegistry.h"
+#include "test_utils.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include <chrono>
 #include <cmath>
@@ -11,19 +9,8 @@
 #include <iostream>
 #include <memory>
 #include <thread>
-using TestDeviceRegistry = GamepadCore::TBasicDeviceRegistry<Ftest_device_registry_policy>;
 
-#if _WIN32
-#include "../../../Examples/Platform_Windows/test_windows_hardware_policy.h"
-using TestHardwarePolicy = Ftest_windows_platform::Ftest_windows_hardware_policy;
-using TestHardwareInfo = Ftest_windows_platform::Ftest_windows_hardware;
-#elif __unix__
-#include "../../../Examples/Platform_Linux/test_linux_hardware_policy.h"
-using TestHardwarePolicy = Ftest_linux_platform::Ftest_linux_hardware_policy;
-using TestHardwareInfo = Ftest_linux_platform::Ftest_linux_hardware;
-#endif
-
-void PrintControlsHelper()
+void print_controls_helper()
 {
 	std::cout << "\n=======================================================" << std::endl;
 	std::cout << "           DUALSENSE INTEGRATION TEST                  " << std::endl;
@@ -50,10 +37,9 @@ int main()
 {
 	std::cout << "[System] Initializing Hardware Layer..." << std::endl;
 
-	auto HardwareImpl = std::make_unique<TestHardwareInfo>();
-	IPlatformHardwareInfo::SetInstance(std::move(HardwareImpl));
-
-	auto Registry = std::make_unique<TestDeviceRegistry>();
+	std::unique_ptr<IPlatformHardwareInfo> Hardware;
+	std::unique_ptr<test_utils::test_device_registry> Registry;
+	test_utils::initialize_test_environment(Hardware, Registry);
 
 	std::cout << "[System] Waiting for controller connection via USB/BT..." << std::endl;
 
@@ -112,7 +98,7 @@ int main()
 					Gamepad->SetPlayerLed(EDSPlayer::One, 255);
 				}
 
-				PrintControlsHelper();
+				print_controls_helper();
 				Gamepad->UpdateOutput();
 			}
 
