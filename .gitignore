@@ -1,0 +1,56 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# CMake
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+cmake-build-*/
+
+# IDEs (CLion, VS Code, etc)
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Git submodules (se necessário, mas geralmente mantemos .git)
+# No entanto, se houver pastas de build dentro de submodules:
+**/cmake-build-*/
+**/CMakeFiles/
