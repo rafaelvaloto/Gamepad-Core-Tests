@@ -10,12 +10,12 @@ set(TEST_COMMON_SOURCES "")
 
 if(WIN32)
     list(APPEND TEST_COMMON_SOURCES
-        Platform/windows/windows_device_info.cpp
+            Platform/windows/windows_device_info.cpp
     )
     add_compile_definitions(UNICODE _UNICODE)
 elseif(UNIX AND NOT APPLE)
     list(APPEND TEST_COMMON_SOURCES
-        Platform/linux/linux_device_info.cpp
+            Platform/linux/linux_device_info.cpp
     )
 endif()
 
@@ -24,7 +24,7 @@ add_library(GamepadCoreTestCommon STATIC
 )
 
 target_include_directories(GamepadCoreTestCommon PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
+        .
     ${CMAKE_SOURCE_DIR}/Source/Public
     ${CMAKE_SOURCE_DIR}/Source/Private
 )
