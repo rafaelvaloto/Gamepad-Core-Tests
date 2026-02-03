@@ -70,7 +70,7 @@ int main()
 			}
 			else
 			{
-				std::cout << "\n[Test] No controller found in automated mode. Skipping test." << std::endl;
+				std::cout << "\n[Test] No controller found in automated mode after 5s. Exiting." << std::endl;
 			}
 			break;
 		}

@@ -32,7 +32,8 @@ void linux_device_info::read(FDeviceContext* Context)
 	if (Context->ConnectionType == EDSDeviceConnection::Bluetooth && Context->DeviceType == EDSDeviceType::DualShock4)
 	{
 		const size_t InputReportLength = 547;
-		if (SDL_hid_read(DeviceHandle, Context->BufferDS4, InputReportLength) < 0)
+		std::int32_t BytesRead = 0;
+		if (poll_tick(Context->Handle, Context->BufferDS4, (std::int32_t)InputReportLength, BytesRead) == EPollResult::Disconnected)
 		{
 			invalidate_handle(Context);
 		}
@@ -46,7 +47,8 @@ void linux_device_info::read(FDeviceContext* Context)
 		return;
 	}
 
-	if (SDL_hid_read(DeviceHandle, Context->Buffer, InputReportLength) < 0)
+	std::int32_t BytesRead = 0;
+	if (poll_tick(Context->Handle, Context->Buffer, (std::int32_t)InputReportLength, BytesRead) == EPollResult::Disconnected)
 	{
 		invalidate_handle(Context);
 	}
@@ -61,10 +63,21 @@ void linux_device_info::process_audio_haptic(FDeviceContext* Context)
 
 	SDL_hid_device* DeviceHandle = static_cast<SDL_hid_device*>(Context->Handle);
 
-	constexpr size_t Report = 142;
-	int BytesWritten = SDL_hid_write(DeviceHandle, Context->BufferAudio, Report);
-	if (BytesWritten < 0)
+	if (Context->ConnectionType == EDSDeviceConnection::Bluetooth)
 	{
+		// DualSense Bluetooth Audio Haptic report ID is 0x31
+		// On some Linux versions, we must ensure the report is sent with the correct ID.
+		// BufferAudio already has 0x31 at index 0.
+		
+		constexpr size_t ReportSize = 78; // Try 78 for standard haptics or 147 for advanced
+		// DualSense Bluetooth haptics often use 78-byte reports (0x31)
+		
+		int BytesWritten = SDL_hid_write(DeviceHandle, Context->BufferAudio, 147);
+		if (BytesWritten < 0)
+		{
+			// Try with 78 if 147 fails
+			SDL_hid_write(DeviceHandle, Context->BufferAudio, 78);
+		}
 	}
 }
 
@@ -205,6 +218,50 @@ void linux_device_info::invalidate_handle(FDeviceContext* Context)
 		unsigned char* RawOutput = Context->GetRawOutputBuffer();
 		std::memset(RawOutput, 0, 78);
 	}
+}
+
+std::string linux_device_info::get_container_id(const std::string& DevicePath)
+{
+	// No Linux, dispositivos HID no sysfs geralmente têm um link para um dispositivo "pai" que representa o hardware físico.
+	// Uma forma comum é subir na árvore do sysfs até encontrar um nó que tenha o Container ID ou usar o ID do barramento físico.
+	// Por simplicidade e compatibilidade com o que é esperado (um ID único por controle),
+	// podemos tentar extrair o endereço Bluetooth ou o caminho físico do USB se o Container ID não estiver explícito.
+
+	// No entanto, para seguir o padrão do Windows que retorna um GUID, 
+	// e considerando que o objetivo é pareamento HID + Áudio:
+	
+	// Implementação simplificada: retornar uma string vazia por enquanto ou tentar algo básico.
+	return "";
+}
+
+std::string linux_device_info::get_audio_container_id(const std::string& AudioDeviceId)
+{
+	return "";
+}
+
+EPollResult linux_device_info::poll_tick(FPlatformDeviceHandle Handle, unsigned char* Buffer, std::int32_t Length, std::int32_t& OutBytesRead)
+{
+	if (Handle == INVALID_PLATFORM_HANDLE)
+	{
+		return EPollResult::Disconnected;
+	}
+
+	SDL_hid_device* DeviceHandle = static_cast<SDL_hid_device*>(Handle);
+	int Result = SDL_hid_read(DeviceHandle, Buffer, Length);
+
+	if (Result < 0)
+	{
+		return EPollResult::Disconnected;
+	}
+
+	if (Result == 0)
+	{
+		OutBytesRead = 0;
+		return EPollResult::NoIoThisTick;
+	}
+
+	OutBytesRead = Result;
+	return EPollResult::ReadOk;
 }
 #endif
 #endif

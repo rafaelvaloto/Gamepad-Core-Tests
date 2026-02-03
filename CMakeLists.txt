@@ -12,6 +12,22 @@ if(WIN32)
     add_compile_definitions(UNICODE _UNICODE)
 endif()
 
-# 1. Configure Platform Sources and Libs
+# 1. Configure Gamepad-Core (Core Logic)
+option(LOAD_GAMEPAD_CORE "Load Gamepad-Core library" ON)
+if(LOAD_GAMEPAD_CORE)
+    add_subdirectory(Gamepad-Core)
+endif()
+
+# 2. Configure Platform Sources and Libs
 add_subdirectory(Common)
-add_subdirectory(Integration)
+
+# 3. Configure Integration Tests
+option(BUILD_INTEGRATION_TESTS "Build integration tests" ON)
+option(AUTOMATED_TESTS "Enable automated tests (timeout for CI)" OFF)
+
+if(BUILD_INTEGRATION_TESTS)
+    if(AUTOMATED_TESTS)
+        add_compile_definitions(AUTOMATED_TESTS)
+    endif()
+    add_subdirectory(Integration)
+endif()

@@ -53,6 +53,10 @@ cmake-build-*/
 # Build directories
 /build/
 /build-test/
+/cmake-build-debug/
+/cmakes-build-release/
+/Gamepad-Core/
+.output.txt
 
 # Git submodules (se necessário, mas geralmente mantemos .git)
 # No entanto, se houver pastas de build dentro de submodules:

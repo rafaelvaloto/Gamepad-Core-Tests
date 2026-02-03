@@ -20,6 +20,9 @@
 namespace fs = std::filesystem;
 
 // miniaudio for audio playback and WAV decoding
+#if GAMEPAD_CORE_HAS_AUDIO
+#include "miniaudio.h"
+#endif
 #include "GCore/Interfaces/IPlatformHardwareInfo.h"
 #include "GCore/Interfaces/Segregations/IGamepadAudioHaptics.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
@@ -77,7 +80,11 @@ private:
 // ============================================================================
 struct audio_callback_data
 {
+#if GAMEPAD_CORE_HAS_AUDIO
 	ma_decoder* pDecoder = nullptr;
+#else
+	void* pDecoder = nullptr;
+#endif
 	bool bIsSystemAudio = false;
 	float LowPassStateLeft = 0.0f;
 	float LowPassStateRight = 0.0f;
@@ -95,6 +102,7 @@ struct audio_callback_data
 };
 
 // Audio callback - plays audio on speakers and queues haptics data
+#if GAMEPAD_CORE_HAS_AUDIO
 void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount)
 {
 	auto* pData = static_cast<audio_callback_data*>(pDevice->pUserData);
@@ -275,6 +283,7 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 
 	pData->framesPlayed += framesRead;
 }
+#endif
 
 void consume_haptics_queue(IGamepadAudioHaptics* AudioHaptics, audio_callback_data& callbackData)
 {
@@ -360,7 +369,9 @@ private:
 			}
 		}
 
+#if GAMEPAD_CORE_HAS_AUDIO
 		ma_decoder decoder;
+#endif
 		bool bDecoderInitialized = false;
 
 		if (!bUseSystemAudio)
@@ -376,6 +387,7 @@ private:
 				}
 			}
 
+#if GAMEPAD_CORE_HAS_AUDIO
 			ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
 			if (ma_decoder_init_file(WavFilePath.c_str(), &decoderConfig, &decoder) == MA_SUCCESS)
 			{
@@ -386,13 +398,19 @@ private:
 				std::cerr << "[Worker Error] Failed to load WAV file: " << WavFilePath << std::endl;
 				return;
 			}
+#endif
 		}
 
 		audio_callback_data callbackData;
+#if GAMEPAD_CORE_HAS_AUDIO
 		callbackData.pDecoder = bDecoderInitialized ? &decoder : nullptr;
+#else
+		callbackData.pDecoder = nullptr;
+#endif
 		callbackData.bIsSystemAudio = bUseSystemAudio;
 		callbackData.bIsWireless = bIsWireless;
 
+#if GAMEPAD_CORE_HAS_AUDIO
 		ma_device_config deviceConfig;
 		if (bUseSystemAudio)
 		{
@@ -431,6 +449,7 @@ private:
 			}
 			return;
 		}
+#endif
 
 		while (!callbackData.bFinished && !bFinished.load() && Gamepad->IsConnected())
 		{
@@ -438,11 +457,13 @@ private:
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
 
+#if GAMEPAD_CORE_HAS_AUDIO
 		ma_device_uninit(&device);
 		if (bDecoderInitialized)
 		{
 			ma_decoder_uninit(&decoder);
 		}
+#endif
 		bFinished.store(true);
 	}
 
@@ -490,7 +511,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 	{
 #ifdef AUTOMATED_TESTS
-		WavFiles.push_back(std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Tests/Integration/Datasets/ES_Touch_SCENE.wav");
+		WavFiles.push_back(std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Integration/Datasets/ES_Touch_SCENE.wav");
 		std::cout << "[Test] Automated mode: Using default file." << std::endl;
 #else
 		print_help();
@@ -585,8 +606,16 @@ int main(int argc, char* argv[])
 
 #ifdef AUTOMATED_TESTS
 		static auto StartTime = std::chrono::steady_clock::now();
-		if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - StartTime).count() >= 10)
+		if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - StartTime).count() >= 30)
 		{
+			if (!ActiveWorkers.empty())
+			{
+				std::cout << "[Test] Automated timeout reached (30s). Finishing..." << std::endl;
+			}
+			else
+			{
+				std::cout << "[Test] No controller found in automated mode after 30s. Exiting." << std::endl;
+			}
 			break;
 		}
 #endif

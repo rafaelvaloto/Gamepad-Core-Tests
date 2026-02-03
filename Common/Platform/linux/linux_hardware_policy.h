@@ -3,7 +3,9 @@
 #ifdef BUILD_GAMEPAD_CORE_TESTS
 #include "GCore/Templates/TGenericHardwareInfo.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
+#if GAMEPAD_CORE_HAS_AUDIO
 #include "miniaudio.h"
+#endif
 #include "linux_device_info.h"
 #include <string>
 #include <vector>
@@ -49,6 +51,7 @@ namespace linux_platform
 
 		static void InitializeAudioDevice(FDeviceContext* Context)
 		{
+#if GAMEPAD_CORE_HAS_AUDIO
 			if (!Context)
 			{
 				return;
@@ -82,11 +85,14 @@ namespace linux_platform
 				std::string deviceName(pPlaybackInfos[i].name);
 
 				// Check if device name contains DualSense identifiers
+				// On Linux, the audio device name might vary (e.g., "DualSense Wireless Controller Analog Stereo")
 				if (deviceName.find("DualSense") != std::string::npos ||
-				    deviceName.find("Wireless Controller") != std::string::npos)
+				    deviceName.find("Wireless Controller") != std::string::npos ||
+				    deviceName.find("Sony") != std::string::npos)
 				{
 					foundDeviceId = pPlaybackInfos[i].id;
 					pFoundDeviceId = &foundDeviceId;
+					std::cout << "[InitializeAudioDevice] Found potential audio device: " << deviceName << std::endl;
 					break;
 				}
 			}
@@ -101,6 +107,7 @@ namespace linux_platform
 			}
 
 			ma_context_uninit(&maContext);
+#endif
 		}
 	};
 } // namespace linux_platform
