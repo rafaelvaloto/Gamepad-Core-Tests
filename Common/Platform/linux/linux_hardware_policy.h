@@ -3,10 +3,10 @@
 #ifdef BUILD_GAMEPAD_CORE_TESTS
 #include "GCore/Templates/TGenericHardwareInfo.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
+#include "miniaudio.h"
 #include "linux_device_info.h"
 #include <string>
 #include <vector>
-#include "Libs/miniaudio.h"
 
 namespace linux_platform
 {
@@ -103,5 +103,5 @@ namespace linux_platform
 			ma_context_uninit(&maContext);
 		}
 	};
-}
+} // namespace linux_platform
 #endif

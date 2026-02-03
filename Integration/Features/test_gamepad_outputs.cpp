@@ -1,6 +1,6 @@
 ﻿#ifdef BUILD_GAMEPAD_CORE_TESTS
-#include "test_utils.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
+#include "test_utils.h"
 #include <chrono>
 #include <cmath>
 #include <format>

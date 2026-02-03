@@ -3,15 +3,15 @@
 #ifdef BUILD_GAMEPAD_CORE_TESTS
 #include "GCore/Templates/TGenericHardwareInfo.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
+#include "miniaudio.h"
 #include "windows_device_info.h"
 #include <cwchar>
-#include <mmdeviceapi.h>
-#include <propsys.h>
-#include <string>
 #include <initguid.h>
+#include <mmdeviceapi.h>
 #include <mutex>
+#include <propsys.h>
 #include <set>
-#include "Libs/miniaudio.h"
+#include <string>
 
 namespace windows_platform
 {
@@ -168,5 +168,5 @@ namespace windows_platform
 			ma_context_uninit(&maContext);
 		}
 	};
-}
+} // namespace windows_platform
 #endif

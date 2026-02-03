@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 # 1. Configure Platform Sources and Libs
-add_subdirectory(${CMAKE_SOURCE_DIR}/Tests/Common ${CMAKE_CURRENT_BINARY_DIR}/Common)
+# GamepadCoreTestCommon is added by the parent Tests/CMakeLists.txt
 
 
 # 2. Create Executables

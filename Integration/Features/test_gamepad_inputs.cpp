@@ -1,8 +1,8 @@
 ﻿// Copyright (c) 2025 Rafael Valoto. All Rights Reserved.
 #ifdef BUILD_GAMEPAD_CORE_TESTS
-#include "test_utils.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include "GCore/Types/Structs/Context/InputContext.h"
+#include "test_utils.h"
 #include <chrono>
 #include <iomanip>
 #include <iostream>

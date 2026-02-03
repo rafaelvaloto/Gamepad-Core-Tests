@@ -20,8 +20,8 @@ extern "C"
 #include <filesystem>
 #include <mmdeviceapi.h>
 #include <propsys.h>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #ifdef DEFINE_PROPERTYKEY
 #undef DEFINE_PROPERTYKEY

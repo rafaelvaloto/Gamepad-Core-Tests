@@ -20,12 +20,12 @@
 namespace fs = std::filesystem;
 
 // miniaudio for audio playback and WAV decoding
-#include "test_utils.h"
-#include "GImplementations/Utils/GamepadAudio.h"
 #include "GCore/Interfaces/IPlatformHardwareInfo.h"
 #include "GCore/Interfaces/Segregations/IGamepadAudioHaptics.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
+#include "GImplementations/Utils/GamepadAudio.h"
+#include "test_utils.h"
 
 // ============================================================================
 // Audio Haptics Constants (Based on AudioHapticsListener)
