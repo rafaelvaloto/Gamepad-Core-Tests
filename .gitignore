@@ -50,6 +50,10 @@ cmake-build-*/
 *.swo
 .DS_Store
 
+# Build directories
+/build/
+/build-test/
+
 # Git submodules (se necessário, mas geralmente mantemos .git)
 # No entanto, se houver pastas de build dentro de submodules:
 **/cmake-build-*/
