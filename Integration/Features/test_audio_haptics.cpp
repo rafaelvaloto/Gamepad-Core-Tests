@@ -584,7 +584,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 	{
 #ifdef AUTOMATED_TESTS
-		WavFilePath = std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Integration/Datasets/ES_Touch_SCENE.wav";
+		WavFilePath = std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Tests/Integration/Datasets/ES_Replay_Lawd_Ito.wav";
 		bUseSystemAudio = false;
 		std::cout << "[Test] Automated mode: Forcing audio file: " << WavFilePath << std::endl;
 #else

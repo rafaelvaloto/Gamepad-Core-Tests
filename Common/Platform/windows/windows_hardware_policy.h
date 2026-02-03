@@ -83,9 +83,9 @@ namespace windows_platform
 
 		void InvalidateHandle(FDeviceContext* Context)
 		{
-			if (Context && Context->AudioContext && Context->AudioContext->IsInitialized())
+			if (Context && Context->AudioContext && Context->AudioContext->bInitialized)
 			{
-				audio_device_registry::Get().UnregisterDevice(Context->AudioContext->GetDeviceId());
+				audio_device_registry::Get().UnregisterDevice(Context->AudioContext->DeviceId);
 			}
 			windows_device_info::invalidate_handle(Context);
 		}

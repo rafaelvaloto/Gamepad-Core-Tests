@@ -511,7 +511,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 	{
 #ifdef AUTOMATED_TESTS
-		WavFiles.push_back(std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Integration/Datasets/ES_Touch_SCENE.wav");
+		WavFiles.push_back(std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Tests/Integration/Datasets/ES_Replay_Lawd_Ito.wav");
 		std::cout << "[Test] Automated mode: Using default file." << std::endl;
 #else
 		print_help();
