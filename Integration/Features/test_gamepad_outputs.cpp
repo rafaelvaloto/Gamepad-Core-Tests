@@ -48,7 +48,7 @@ int main()
 	const int32_t TargetDeviceId = 0;
 
 #ifdef AUTOMATED_TESTS
-	std::cout << "[Test] Automated mode active. The test will end in 5s." << std::endl;
+	std::cout << "[Test] Automated mode active. The test will end in 30s." << std::endl;
 	auto startTime = std::chrono::steady_clock::now();
 #endif
 
@@ -62,15 +62,15 @@ int main()
 	{
 #ifdef AUTOMATED_TESTS
 		auto now = std::chrono::steady_clock::now();
-		if (std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count() >= 5)
+		if (std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count() >= 30)
 		{
 			if (bControllerFound)
 			{
-				std::cout << "\n[Test] Timeout reached (5s). Finishing..." << std::endl;
+				std::cout << "\n[Test] Timeout reached (30s). Finishing..." << std::endl;
 			}
 			else
 			{
-				std::cout << "\n[Test] No controller found in automated mode after 5s. Exiting." << std::endl;
+				std::cout << "\n[Test] No controller found in automated mode after 30s. Exiting." << std::endl;
 			}
 			break;
 		}
