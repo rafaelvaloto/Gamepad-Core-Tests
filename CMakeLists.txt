@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 # 1. Configure Gamepad-Core (Core Logic)
-option(LOAD_GAMEPAD_CORE "Load Gamepad-Core library" ON)
+option(LOAD_GAMEPAD_CORE "Load Gamepad-Core library" OFF)
 if(LOAD_GAMEPAD_CORE)
     add_subdirectory(Gamepad-Core)
 endif()
