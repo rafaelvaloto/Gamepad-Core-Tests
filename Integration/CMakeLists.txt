@@ -37,11 +37,8 @@ add_executable(test-gamepad-inputs
 )
 
 # 3. Configure Includes
-# The test needs to find Core and Common Test headers
-# Use CMAKE_CURRENT_SOURCE_DIR to be robust when included as submodule
+# GamepadCore and GamepadCoreTestCommon propagate their includes when linked
 set(COMMON_INCLUDES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/Public"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/Private"
         "${CMAKE_CURRENT_SOURCE_DIR}/../Common"
         "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
@@ -60,8 +57,9 @@ if(BUILD_INTEGRATION_TESTS OR BUILD_TESTS)
 endif()
 
 # Add project root path as a compile definition
-target_compile_definitions(test-audio-haptics PRIVATE GAMEPAD_CORE_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
-target_compile_definitions(test-channels-haptics PRIVATE GAMEPAD_CORE_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
+get_filename_component(PROJECT_ROOT_ABS "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+target_compile_definitions(test-audio-haptics PRIVATE GAMEPAD_CORE_PROJECT_ROOT="${PROJECT_ROOT_ABS}")
+target_compile_definitions(test-channels-haptics PRIVATE GAMEPAD_CORE_PROJECT_ROOT="${PROJECT_ROOT_ABS}")
 
 # 4. Linking
 # Link with static lib (GamepadCore) and Common Test Lib

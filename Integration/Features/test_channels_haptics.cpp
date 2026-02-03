@@ -377,7 +377,7 @@ private:
 		if (!bUseSystemAudio)
 		{
 			fs::path p(WavFilePath);
-			if (!fs::exists(p))
+			if (!p.is_absolute() && !fs::exists(p))
 			{
 				fs::path alternativePath = fs::path(GAMEPAD_CORE_PROJECT_ROOT) / WavFilePath;
 				if (fs::exists(alternativePath))

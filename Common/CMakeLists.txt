@@ -23,14 +23,8 @@ add_library(GamepadCoreTestCommon STATIC
     ${TEST_COMMON_SOURCES}
 )
 
-# Use relative paths from CMAKE_CURRENT_SOURCE_DIR to be robust as submodule
-set(CORE_PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/Public")
-set(CORE_PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/Private")
-
 target_include_directories(GamepadCoreTestCommon PUBLIC
         .
-        ${CORE_PUBLIC}
-        ${CORE_PRIVATE}
 )
 
 target_compile_definitions(GamepadCoreTestCommon PUBLIC BUILD_GAMEPAD_CORE_TESTS)

@@ -425,7 +425,7 @@ private:
 		if (!bUseSystemAudio)
 		{
 			fs::path p(WavFilePath);
-			if (!fs::exists(p))
+			if (!p.is_absolute() && !fs::exists(p))
 			{
 				fs::path alternativePath = fs::path(GAMEPAD_CORE_PROJECT_ROOT) / WavFilePath;
 				if (fs::exists(alternativePath))
@@ -584,7 +584,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 	{
 #ifdef AUTOMATED_TESTS
-		WavFilePath = std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Tests/Integration/Datasets/ES_Replay_Lawd_Ito.wav";
+		WavFilePath = std::string(GAMEPAD_CORE_PROJECT_ROOT) + "/Integration/Datasets/ES_Touch_SCENE.wav";
 		bUseSystemAudio = false;
 		std::cout << "[Test] Automated mode: Forcing audio file: " << WavFilePath << std::endl;
 #else
@@ -637,6 +637,7 @@ int main(int argc, char* argv[])
 		std::cout << "  - Channels: " << decoder.outputChannels << std::endl;
 		std::cout << "  - Total Frames: " << totalFrames << std::endl;
 		std::cout << "  - Duration: " << (static_cast<float>(totalFrames) / decoder.outputSampleRate) << " seconds" << std::endl;
+		ma_decoder_uninit(&decoder);
 #else
 		std::cout << "[System] Audio support disabled. WAV playback not available." << std::endl;
 #endif
