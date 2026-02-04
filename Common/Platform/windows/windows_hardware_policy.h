@@ -9,6 +9,7 @@
 #include <initguid.h>
 #include <mmdeviceapi.h>
 #include <mutex>
+#include "GCore/Utils/SoDefines.h"
 #include <propsys.h>
 #include <set>
 #include <string>
@@ -28,19 +29,19 @@ namespace windows_platform
 
 		void RegisterDevice(const ma_device_id& DeviceId)
 		{
-			std::lock_guard<std::mutex> Lock(Mutex);
+			gc_lock::lock_guard<gc_lock::mutex> Lock(Mutex);
 			UsedDevices.insert(DeviceId);
 		}
 
 		void UnregisterDevice(const ma_device_id& DeviceId)
 		{
-			std::lock_guard<std::mutex> Lock(Mutex);
+			gc_lock::lock_guard<gc_lock::mutex> Lock(Mutex);
 			UsedDevices.erase(DeviceId);
 		}
 
 		bool IsDeviceInUse(const ma_device_id& DeviceId)
 		{
-			std::lock_guard<std::mutex> Lock(Mutex);
+			gc_lock::lock_guard<gc_lock::mutex> Lock(Mutex);
 			return UsedDevices.find(DeviceId) != UsedDevices.end();
 		}
 
@@ -53,7 +54,7 @@ namespace windows_platform
 			}
 		};
 
-		std::mutex Mutex;
+		gc_lock::mutex Mutex;
 		std::set<ma_device_id, DeviceIdCompare> UsedDevices;
 	};
 
@@ -83,9 +84,9 @@ namespace windows_platform
 
 		void InvalidateHandle(FDeviceContext* Context)
 		{
-			if (Context && Context->AudioContext && Context->AudioContext->IsInitialized())
+			if (Context && Context->AudioContext && Context->AudioContext->bInitialized)
 			{
-				audio_device_registry::Get().UnregisterDevice(Context->AudioContext->GetDeviceId());
+				audio_device_registry::Get().UnregisterDevice(Context->AudioContext->DeviceId);
 			}
 			windows_device_info::invalidate_handle(Context);
 		}

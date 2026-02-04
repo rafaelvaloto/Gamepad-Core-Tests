@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include "GCore/Utils/SoDefines.h"
 #include <queue>
 #include <thread>
 #include <vector>
@@ -48,13 +49,13 @@ class thread_safe_queue
 public:
 	void push(const T& item)
 	{
-		std::lock_guard<std::mutex> lock(mMutex);
+		gc_lock::lock_guard<gc_lock::mutex> lock(mMutex);
 		mQueue.push(item);
 	}
 
 	bool pop(T& item)
 	{
-		std::lock_guard<std::mutex> lock(mMutex);
+		gc_lock::lock_guard<gc_lock::mutex> lock(mMutex);
 		if (mQueue.empty())
 		{
 			return false;
@@ -66,13 +67,13 @@ public:
 
 	bool empty()
 	{
-		std::lock_guard<std::mutex> lock(mMutex);
+		gc_lock::lock_guard<gc_lock::mutex> lock(mMutex);
 		return mQueue.empty();
 	}
 
 private:
 	std::queue<T> mQueue;
-	std::mutex mMutex;
+	gc_lock::mutex mMutex;
 };
 
 // ============================================================================
@@ -98,7 +99,7 @@ struct audio_callback_data
 
 	// Accumulator for Bluetooth - need 1024 frames to produce 64 resampled frames
 	std::vector<float> btAccumulator;
-	std::mutex btAccumulatorMutex;
+	gc_lock::mutex btAccumulatorMutex;
 };
 
 // Audio callback - plays audio on speakers and queues haptics data
@@ -212,7 +213,7 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 			std::vector<float> framesToProcess;
 
 			{
-				std::lock_guard<std::mutex> lock(pData->btAccumulatorMutex);
+  		gc_lock::lock_guard<gc_lock::mutex> lock(pData->btAccumulatorMutex);
 				if (pData->btAccumulator.size() < requiredSamples)
 				{
 					break; // Not enough data yet, exit loop but continue to update framesPlayed
@@ -425,7 +426,7 @@ private:
 		if (!bUseSystemAudio)
 		{
 			fs::path p(WavFilePath);
-			if (!fs::exists(p))
+			if (!p.is_absolute() && !fs::exists(p))
 			{
 				fs::path alternativePath = fs::path(GAMEPAD_CORE_PROJECT_ROOT) / WavFilePath;
 				if (fs::exists(alternativePath))
@@ -541,11 +542,11 @@ private:
 struct audio_test_registry_policy : public test_utils::test_registry_policy
 {
 	std::vector<uint32_t> NewGamepads;
-	std::mutex NewGamepadsMutex;
+ gc_lock::mutex NewGamepadsMutex;
 
 	void DispatchNewGamepad(uint32_t GamepadId)
 	{
-		std::lock_guard<std::mutex> Lock(NewGamepadsMutex);
+  gc_lock::lock_guard<gc_lock::mutex> Lock(NewGamepadsMutex);
 		NewGamepads.push_back(GamepadId);
 		std::cout << "[Policy] New Gamepad Registered: " << GamepadId << std::endl;
 	}
@@ -637,6 +638,7 @@ int main(int argc, char* argv[])
 		std::cout << "  - Channels: " << decoder.outputChannels << std::endl;
 		std::cout << "  - Total Frames: " << totalFrames << std::endl;
 		std::cout << "  - Duration: " << (static_cast<float>(totalFrames) / decoder.outputSampleRate) << " seconds" << std::endl;
+		ma_decoder_uninit(&decoder);
 #else
 		std::cout << "[System] Audio support disabled. WAV playback not available." << std::endl;
 #endif
@@ -673,7 +675,7 @@ int main(int argc, char* argv[])
 
 		// Check for new gamepads from policy
 		{
-			std::lock_guard<std::mutex> Lock(Registry->Policy.NewGamepadsMutex);
+   gc_lock::lock_guard<gc_lock::mutex> Lock(Registry->Policy.NewGamepadsMutex);
 			for (int32_t GamepadId : Registry->Policy.NewGamepads)
 			{
 				ISonyGamepad* Gamepad = Registry->GetLibrary(GamepadId);
