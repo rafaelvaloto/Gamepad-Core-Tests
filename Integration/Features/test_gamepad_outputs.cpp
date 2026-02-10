@@ -1,4 +1,5 @@
-﻿#ifdef BUILD_GAMEPAD_CORE_TESTS
+﻿// Copyright (c) 2025 Rafael Valoto. All Rights Reserved.
+#ifdef BUILD_GAMEPAD_CORE_TESTS
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include "test_utils.h"
 #include <chrono>
