@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Rafael Valoto. All rights reserved.
 #define _FUNCTIONDISCOVERYKEYS_DEV_PKEY_H_
 #include "windows_device_info.h"
+#include "GCore/Interfaces/IAudioDevice.h"
 #include <initguid.h>
 #include <iostream>
 #include <setupapi.h>

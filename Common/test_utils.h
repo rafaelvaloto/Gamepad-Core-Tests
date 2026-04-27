@@ -2,7 +2,7 @@
 #pragma once
 #ifdef BUILD_GAMEPAD_CORE_TESTS
 
-#include "GCore/Interfaces/IPlatformHardwareInfo.h"
+#include "GCore/Interfaces/IPlatformHardware.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
 #include <iostream>
 #include <memory>
@@ -56,15 +56,10 @@ namespace test_utils
 	 * @param OutRegistry Pointer to the device registry.
 	 */
 	inline void initialize_test_environment(
-	    std::unique_ptr<IPlatformHardwareInfo>& OutHardware,
+	    std::unique_ptr<IPlatformHardware>& OutHardware,
 	    std::unique_ptr<test_device_registry>& OutRegistry)
 	{
-		OutHardware = std::make_unique<platform_hardware>();
-		IPlatformHardwareInfo::SetInstance(std::move(OutHardware));
-		// Get it back for reference if needed, although it's now owned by the static instance
-		// But for tests it's better to let the user have it if they asked for it.
-		// Actually IPlatformHardwareInfo::SetInstance takes ownership.
-
+		IPlatformHardware::SetInstance(std::move(OutHardware));
 		OutRegistry = std::make_unique<test_device_registry>();
 
 		std::cout << "[test_utils] Environment initialized." << std::endl;

@@ -46,9 +46,9 @@ int main(int argc, char* argv[])
 		bLogAnalogs = true;
 	}
 
-	std::cout << "--- Gamepad Input Test ---" << std::endl;
+	std::cout << "--- GamepadBase Input Test ---" << std::endl;
 
-	std::unique_ptr<IPlatformHardwareInfo> Hardware;
+	std::unique_ptr<IPlatformHardware> Hardware;
 	std::unique_ptr<test_utils::test_device_registry> Registry;
 	test_utils::initialize_test_environment(Hardware, Registry);
 
@@ -83,7 +83,7 @@ int main(int argc, char* argv[])
 		float DeltaTime = 0.016f;
 		Registry->PlugAndPlay(DeltaTime);
 
-		ISonyGamepad* Gamepad = Registry->GetLibrary(TargetDeviceId);
+		IGamepadBase* Gamepad = Registry->GetLibrary(TargetDeviceId);
 
 		if (Gamepad && Gamepad->IsConnected())
 		{
