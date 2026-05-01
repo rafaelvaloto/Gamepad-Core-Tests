@@ -27,11 +27,21 @@ namespace fs = std::filesystem;
 #include "GCore/Interfaces/IPlatformHardware.h"
 #include "GCore/Interfaces/Segregations/IGamepadBase.h"
 #include "GCore/Interfaces/Segregations/IGamepadHaptics.h"
-#include "GCore/Templates/TAudioDeviceRegistry.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
-#include "GImplementations/Utils/GamepadAudio.h"
+#include "opus.h"
 #include "test_utils.h"
+
+static OpusEncoder* encoder;
+struct BTPacket
+{
+	std::vector<uint8_t> haptics; // 3000Hz data
+	std::vector<uint8_t> opus;    // 200 data
+};
+
+struct samplesSend {
+	BTPacket pack1, pack2;
+};
 
 // ============================================================================
 // Audio Haptics Constants (Based on AudioHapticsListener)
@@ -96,12 +106,10 @@ struct audio_callback_data
 	bool bIsWireless = false;
 
 	// Queues for haptics (like AudioHapticsListener)
-	thread_safe_queue<std::vector<uint8_t>> btPacketQueue;
+	thread_safe_queue<BTPacket> btPacketQueue;
+	thread_safe_queue<std::vector<float>> btAccumulator;
 	thread_safe_queue<std::vector<int16_t>> usbSampleQueue;
-
-	// Accumulator for Bluetooth - need 1024 frames to produce 64 resampled frames
-	std::vector<float> btAccumulator;
-	gc_lock::mutex btAccumulatorMutex;
+	// Accumulator for Bluetooth - need 480 frames for 10ms Opus frame @ 48kHz
 };
 
 // Audio callback - plays audio on speakers and queues haptics data
@@ -114,9 +122,8 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 		return;
 	}
 
-	std::vector<float> tempBuffer(frameCount * 2);
+	std::vector<float> tempBuffer(frameCount * 2 * sizeof(float));
 	ma_uint64 framesRead = 0;
-
 	if (pData->bIsSystemAudio)
 	{
 		// Capture from system audio (loopback)
@@ -126,14 +133,16 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 		}
 
 		// miniaudio already provides the captured audio in pInput
-		const float* pInputFloat = static_cast<const float*>(pInput);
-		std::memcpy(tempBuffer.data(), pInputFloat, frameCount * 2 * sizeof(float));
+		const auto* pInputFloat = static_cast<const float*>(pInput);
+
+		pData->btAccumulator.push(std::vector<float>(pInputFloat, pInputFloat + frameCount * 2 * sizeof(float)));
 		framesRead = frameCount;
 
 		// If we are in duplex mode or playback, we might want to copy to pOutput to hear it
 		// But usually loopback capture is enough.
 		if (pOutput)
 		{
+			std::cout << "Loopback capture: copying " << framesRead << " frames to output" << std::endl;
 			std::memcpy(pOutput, pInput, frameCount * 2 * sizeof(float));
 		}
 	}
@@ -150,7 +159,6 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 		}
 
 		ma_result result = ma_decoder_read_pcm_frames(pData->pDecoder, tempBuffer.data(), frameCount, &framesRead);
-
 		if (result != MA_SUCCESS || framesRead == 0)
 		{
 			pData->bFinished = true;
@@ -169,7 +177,7 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 
 			if (framesRead < frameCount)
 			{
-				std::memset(&pOutputFloat[framesRead * 2], 0, (frameCount - framesRead) * 2 * sizeof(float));
+				std::memset(&pOutputFloat[framesRead * 2], 0, (frameCount - framesRead) * 2);
 			}
 		}
 	}
@@ -197,122 +205,48 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 	}
 	else
 	{
-		// Bluetooth: Need to accumulate 1024 input frames to get 64 output frames at 3000Hz
-		// 1024 frames at 48kHz * (3000/48000) = 64 frames at 3000Hz
-
-		// Add current frames to accumulator
-		for (ma_uint64 i = 0; i < framesRead; ++i)
+		// samplesSend samples;
+		std::vector<float> item;
+		while (pData->btAccumulator.pop(item))
 		{
-			pData->btAccumulator.push_back(tempBuffer[i * 2]);     // Left
-			pData->btAccumulator.push_back(tempBuffer[i * 2 + 1]); // Right
+			BTPacket packet;
+			packet.opus = std::vector<uint8_t>(200);
+			int encodedBytes = opus_encode_float(encoder, item.data(), 480, packet.opus.data(), 200);
+			if (encodedBytes <= 0)
+			{
+				std::cout << "Opus encoding failed: " << encodedBytes << std::endl;
+				break;
+			}
+
+			std::vector<uint8_t> hapticsData(60);
+			for (int i = 0; i < 30; ++i)
+			{
+				int srcIdx = i * 16;
+				float left = item[srcIdx * 2];
+				float right = item[srcIdx * 2 + 1];
+
+				hapticsData[i * 2] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(left * 127.0f)), -128, 127));
+				hapticsData[i * 2 + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(right * 127.0f)), -128, 127));
+			}
+			packet.haptics = hapticsData;
+			pData->btPacketQueue.push(packet);
+
+			/// Test
+			// static int packCount = 0;
+			// if (packCount == 0)
+			// {
+			// 	samples.pack1 = packet;
+			// 	packCount++;
+			// } else if (packCount == 1)
+			// {
+			// 	samples.pack2 = packet;
+			// 	packCount = 0;
+			// 	break;
+			// }
 		}
 
-		// Process when we have at least 1024 frames (2048 samples)
-		const size_t requiredSamples = 1024 * 2; // 1024 frames * 2 channels
-
-		while (true)
-		{
-			std::vector<float> framesToProcess;
-
-			{
-				gc_lock::lock_guard<gc_lock::mutex> lock(pData->btAccumulatorMutex);
-				if (pData->btAccumulator.size() < requiredSamples)
-				{
-					break; // Not enough data yet, exit loop but continue to update framesPlayed
-				}
-
-				// Extract 1024 frames from accumulator
-				framesToProcess.assign(pData->btAccumulator.begin(), pData->btAccumulator.begin() + requiredSamples);
-				pData->btAccumulator.erase(pData->btAccumulator.begin(), pData->btAccumulator.begin() + requiredSamples);
-			}
-
-			// Now resample 1024 frames to 64 frames
-			const float ratio = 3000.0f / 48000.0f; // 0.0625
-			const std::int32_t numInputFrames = 1024;
-
-			std::vector<float> resampledData(128, 0.0f); // 64 frames * 2 channels
-
-			for (std::int32_t outFrame = 0; outFrame < 64; ++outFrame)
-			{
-				float srcPos = static_cast<float>(outFrame) / ratio;
-				std::int32_t srcIndex = static_cast<std::int32_t>(srcPos);
-				float frac = srcPos - static_cast<float>(srcIndex);
-
-				if (srcIndex >= numInputFrames - 1)
-				{
-					srcIndex = numInputFrames - 2;
-					frac = 1.0f;
-				}
-				if (srcIndex < 0)
-				{
-					srcIndex = 0;
-				}
-
-				float left0 = framesToProcess[srcIndex * 2];
-				float left1 = framesToProcess[(srcIndex + 1) * 2];
-				float right0 = framesToProcess[srcIndex * 2 + 1];
-				float right1 = framesToProcess[(srcIndex + 1) * 2 + 1];
-
-				resampledData[outFrame * 2] = left0 + frac * (left1 - left0);
-				resampledData[outFrame * 2 + 1] = right0 + frac * (right1 - right0);
-			}
-
-			// Apply high-pass filter to all 64 frames
-			for (std::int32_t i = 0; i < 64; ++i)
-			{
-				const std::int32_t dataIndex = i * 2;
-
-				float inLeft = resampledData[dataIndex];
-				float inRight = resampledData[dataIndex + 1];
-
-				pData->LowPassStateLeft = kOneMinusAlphaBt * inLeft + kLowPassAlphaBt * pData->LowPassStateLeft;
-				pData->LowPassStateRight = kOneMinusAlphaBt * inRight + kLowPassAlphaBt * pData->LowPassStateRight;
-
-				resampledData[dataIndex] = inLeft - pData->LowPassStateLeft;
-				resampledData[dataIndex + 1] = inRight - pData->LowPassStateRight;
-			}
-
-			// Create Packet1: Frames 0-31 (64 bytes)
-			std::vector<std::int8_t> packet1(64, 0);
-
-			for (std::int32_t i = 0; i < 32; ++i)
-			{
-				const std::int32_t dataIndex = i * 2;
-
-				float leftSample = resampledData[dataIndex];
-				float rightSample = resampledData[dataIndex + 1];
-
-				std::int8_t leftInt8 = static_cast<std::int8_t>(std::clamp(static_cast<int>(std::round(leftSample * 127.0f)), -128, 127));
-				std::int8_t rightInt8 = static_cast<std::int8_t>(std::clamp(static_cast<int>(std::round(rightSample * 127.0f)), -128, 127));
-
-				packet1[dataIndex] = leftInt8;
-				packet1[dataIndex + 1] = rightInt8;
-			}
-
-			// Create Packet2: Frames 32-63 (64 bytes)
-			std::vector<std::int8_t> packet2(64, 0);
-			for (std::int32_t i = 0; i < 32; ++i)
-			{
-				const std::int32_t dataIndex = (i + 32) * 2;
-
-				float leftSample = resampledData[dataIndex];
-				float rightSample = resampledData[dataIndex + 1];
-
-				std::int8_t leftInt8 = static_cast<std::int8_t>(std::clamp(static_cast<int>(std::round(leftSample * 127.0f)), -128, 127));
-				std::int8_t rightInt8 = static_cast<std::int8_t>(std::clamp(static_cast<int>(std::round(rightSample * 127.0f)), -128, 127));
-
-				const std::int32_t packetIndex = i * 2;
-				packet2[packetIndex] = leftInt8;
-				packet2[packetIndex + 1] = rightInt8;
-			}
-
-			// Convert to uint8 and enqueue
-			std::vector<std::uint8_t> packet1Unsigned(packet1.begin(), packet1.end());
-			std::vector<std::uint8_t> packet2Unsigned(packet2.begin(), packet2.end());
-
-			pData->btPacketQueue.push(packet1Unsigned);
-			pData->btPacketQueue.push(packet2Unsigned);
-		}
+		// pData->btPacketQueue.push(samples.pack1);
+		// pData->btPacketQueue.push(samples.pack2);
 	}
 
 	pData->framesPlayed += framesRead;
@@ -324,10 +258,10 @@ void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& c
 {
 	if (callbackData.bIsWireless)
 	{
-		std::vector<std::uint8_t> packet;
-		while (callbackData.btPacketQueue.pop(packet))
+		BTPacket chunk;
+		while (callbackData.btPacketQueue.pop(chunk))
 		{
-			AudioHaptics->AudioHapticUpdate(packet);
+			AudioHaptics->AudioHapticUpdate(chunk.haptics, chunk.opus);
 		}
 	}
 	else
@@ -568,7 +502,7 @@ struct FAudioDeviceContext
 	using AudioRingBufferType = ma_pcm_rb;
 	using AudioFrameCountType = ma_uint32;
 
-	int NumChannels = 4;
+	int NumChannels = 2;
 	int SampleRate = 48000;
 	bool bInitialized = false;
 	bool bHasDeviceId = false;
@@ -598,6 +532,10 @@ struct FAudioDeviceContext
 		AudioFrameCountType framesAvailable = ma_pcm_rb_available_read(&pContext->RingBuffer);
 		AudioFrameCountType framesToRead = frameCount;
 
+		std::cout << "[AudioPolicy] Audio data framesAvailable: " << framesAvailable << std::endl;
+		std::cout << "[AudioPolicy] Audio data framesToRead: " << framesToRead << std::endl;
+		std::cout << "[AudioPolicy] Audio data framesToRead: " << frameCount << std::endl;
+
 		if (framesAvailable < framesToRead)
 		{
 			framesToRead = framesAvailable;
@@ -610,15 +548,16 @@ struct FAudioDeviceContext
 			ma_pcm_rb_acquire_read(&pContext->RingBuffer, &readSize, &pReadBuffer);
 
 			std::memcpy(pOutput, pReadBuffer, readSize * pContext->NumChannels * sizeof(float));
-
 			ma_pcm_rb_commit_read(&pContext->RingBuffer, readSize);
 		}
 
 		if (framesToRead < frameCount)
 		{
+
+			std::cout << "[AudioPolicy] Audio data framesToRead < frameCount: " << (framesToRead < frameCount) << std::endl;
+
 			auto pOutputFloat = static_cast<float*>(pOutput);
 			AudioFrameCountType framesMissing = frameCount - framesToRead;
-
 			std::memset(&pOutputFloat[framesToRead * pContext->NumChannels], 0,
 			            framesMissing * pContext->NumChannels * sizeof(float));
 		}
@@ -868,7 +807,7 @@ public:
 		for (ma_uint32 i = 0; i < playbackCount; i++)
 		{
 			std::string AudioContainerId = windows_device_info::get_audio_container_id(pPlaybackInfos[i].id.wasapi);
-			std::cout << "[AudioPolicy] Checking device: " << pPlaybackInfos[i].name 
+			std::cout << "[AudioPolicy] Checking device: " << pPlaybackInfos[i].name
 			          << " | Container ID: " << AudioContainerId << std::endl;
 
 			if (!AudioContainerId.empty() && AudioContainerId == TargetContainerId)
@@ -932,8 +871,24 @@ void print_help()
 // ============================================================================
 // Main Entry Point
 // ============================================================================
-int main(int argc, char* argv[])
+[[noreturn]] int main(int argc, char* argv[])
 {
+	int error = 0;
+	encoder = opus_encoder_create(48000, 2, OPUS_APPLICATION_AUDIO, &error);
+	if (error)
+	{
+		std::cerr << "Failed to create Opus encoder: " << error << std::endl;
+		return -1;
+	}
+
+	opus_encoder_ctl(encoder, OPUS_SET_EXPERT_FRAME_DURATION(OPUS_FRAMESIZE_10_MS));
+	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(160000)); // 240kbps
+	opus_encoder_ctl(encoder, OPUS_SET_VBR(0));
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
+	opus_encoder_ctl(encoder, OPUS_SET_SIGNAL(OPUS_GET_SIGNAL_REQUEST));
+	opus_encoder_ctl(encoder, OPUS_SET_PREDICTION_DISABLED(1));
+	opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC(50));
+
 	std::string WavFilePath;
 	bool bUseSystemAudio = false;
 
@@ -1024,12 +979,11 @@ int main(int argc, char* argv[])
 
 	std::unordered_map<uint32_t, std::unique_ptr<gamepad_audio_worker>> ActiveWorkers;
 
-	while (true)
+	bool IsWorked = false;
+	while (!IsWorked)
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(16));
-		float DeltaTime = 0.016f;
-
-		Registry->PlugAndPlay(DeltaTime);
+		Registry->Policy.NewGamepads.clear();
+		Registry->PlugAndPlay(2.f);
 
 		// Check for new gamepads from policy
 		{
@@ -1039,7 +993,6 @@ int main(int argc, char* argv[])
 				IGamepadBase* Gamepad = Registry->GetLibrary(GamepadId);
 				if (Gamepad)
 				{
-
 					IGamepadSettings* Settings = Gamepad->GetIGamepadSettings();
 					Settings->DualSenseSettings(0x0, 0x1, 0x1, 0, 100, 0xFC, 0, 0);
 
@@ -1067,32 +1020,34 @@ int main(int argc, char* argv[])
 					auto Worker = std::make_unique<gamepad_audio_worker>(Gamepad, WavFilePath, bUseSystemAudio);
 					Worker->start();
 					ActiveWorkers[GamepadId] = std::move(Worker);
+					IsWorked = true;
 				}
 			}
-			Registry->Policy.NewGamepads.clear();
 		}
-
-		// Cleanup finished or disconnected workers
-		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
-		{
-			bool bIsConnected = false;
-			IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
-			if (Gamepad && Gamepad->IsConnected())
-			{
-				bIsConnected = true;
-			}
-
-			if (it->second->is_finished() || !bIsConnected)
-			{
-				std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
-				it = ActiveWorkers.erase(it);
-			}
-			else
-			{
-				++it;
-			}
-		}
-
+	}
+//
+	while (true)
+	{
+		// Clean up finished or disconnected workers
+		// for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
+		// {
+		// 	bool bIsConnected = false;
+		// 	IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
+		// 	if (Gamepad && Gamepad->IsConnected())
+		// 	{
+		// 		bIsConnected = true;
+		// 	}
+		//
+		// 	if (it->second->is_finished() || !bIsConnected)
+		// 	{
+		// 		std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
+		// 		it = ActiveWorkers.erase(it);
+		// 	}
+		// 	else
+		// 	{
+		// 		++it;
+		// 	}
+		// }
 #ifdef AUTOMATED_TESTS
 		static auto StartTime = std::chrono::steady_clock::now();
 		auto Now = std::chrono::steady_clock::now();
