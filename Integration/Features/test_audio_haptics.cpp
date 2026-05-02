@@ -36,7 +36,8 @@ static OpusEncoder* encoder;
 struct BTPacket
 {
 	std::vector<uint8_t> haptics; // 3000Hz data
-	std::vector<uint8_t> opus;    // 200 data
+	std::vector<float> opus;    // 200 data
+	std::vector<uint8_t> signal;    // 200 data
 };
 
 struct samplesSend {
@@ -101,13 +102,13 @@ struct audio_callback_data
 	bool bIsSystemAudio = false;
 	float LowPassStateLeft = 0.0f;
 	float LowPassStateRight = 0.0f;
-	std::atomic<bool> bFinished{false};
-	std::atomic<uint64_t> framesPlayed{0};
+	bool bFinished = false;
+	int framesPlayed = 0;
 	bool bIsWireless = false;
 
 	// Queues for haptics (like AudioHapticsListener)
 	thread_safe_queue<BTPacket> btPacketQueue;
-	thread_safe_queue<std::vector<float>> btAccumulator;
+	thread_safe_queue<std::vector<std::vector<float>>> btAccumulator;
 	thread_safe_queue<std::vector<int16_t>> usbSampleQueue;
 	// Accumulator for Bluetooth - need 480 frames for 10ms Opus frame @ 48kHz
 };
@@ -122,8 +123,10 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 		return;
 	}
 
+	pData->framesPlayed += frameCount;
+
+	uint64_t framesRead = 0;
 	std::vector<float> tempBuffer(frameCount * 2 * sizeof(float));
-	ma_uint64 framesRead = 0;
 	if (pData->bIsSystemAudio)
 	{
 		// Capture from system audio (loopback)
@@ -132,19 +135,20 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 			return;
 		}
 
-		// miniaudio already provides the captured audio in pInput
-		const auto* pInputFloat = static_cast<const float*>(pInput);
+		// const float* samples = static_cast<const float*>(pInput);
+		// std::cout << "Sample L: " << samples[0] << " | Sample R: " << samples[1] << std::endl;
 
-		pData->btAccumulator.push(std::vector<float>(pInputFloat, pInputFloat + frameCount * 2 * sizeof(float)));
-		framesRead = frameCount;
-
-		// If we are in duplex mode or playback, we might want to copy to pOutput to hear it
-		// But usually loopback capture is enough.
-		if (pOutput)
+		static int fk = 0;
+		static std::vector<std::vector<float>> dualChannel = {};
+		if (fk % 2 == 0 && dualChannel.size() == 2)
 		{
-			std::cout << "Loopback capture: copying " << framesRead << " frames to output" << std::endl;
-			std::memcpy(pOutput, pInput, frameCount * 2 * sizeof(float));
+			// miniaudio already provides the captured audio in pInput
+			std::cout << "System audio captured" << std::endl;
+			pData->btAccumulator.push(dualChannel);
+			dualChannel.clear();
 		}
+
+		dualChannel.push_back(std::vector<float>(static_cast<const float*>(pInput), static_cast<const float*>(pInput) + frameCount * 2));
 	}
 	else
 	{
@@ -168,25 +172,13 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 			}
 			return;
 		}
-
-		// Copy to output (for speakers) - audio plays at 48kHz
-		if (pOutput)
-		{
-			auto* pOutputFloat = static_cast<float*>(pOutput);
-			std::memcpy(pOutputFloat, tempBuffer.data(), framesRead * 2 * sizeof(float));
-
-			if (framesRead < frameCount)
-			{
-				std::memset(&pOutputFloat[framesRead * 2], 0, (frameCount - framesRead) * 2);
-			}
-		}
 	}
 
-	// Process for haptics
+
 	if (!pData->bIsWireless)
 	{
 		// USB: Queue 16-bit stereo samples with high-pass filter
-		for (ma_uint64 i = 0; i < framesRead; ++i)
+		for (ma_uint64 i = 0; i < frameCount; ++i)
 		{
 			float inLeft = tempBuffer[i * 2];
 			float inRight = tempBuffer[i * 2 + 1];
@@ -198,61 +190,66 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 			float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
 
 			std::vector<int16_t> stereoSample = {
-			    static_cast<int16_t>(outLeft * 32767.0f),
-			    static_cast<int16_t>(outRight * 32767.0f)};
+				static_cast<int16_t>(outLeft * 32767.0f),
+				static_cast<int16_t>(outRight * 32767.0f)};
 			pData->usbSampleQueue.push(stereoSample);
 		}
 	}
-	else
+
+	// Process for haptics
+	if (pData->bIsWireless)
 	{
 		// samplesSend samples;
-		std::vector<float> item;
+		std::vector<std::vector<float>> item;
 		while (pData->btAccumulator.pop(item))
 		{
-			BTPacket packet;
-			packet.opus = std::vector<uint8_t>(200);
-			int encodedBytes = opus_encode_float(encoder, item.data(), 480, packet.opus.data(), 200);
-			if (encodedBytes <= 0)
+			std::vector<std::vector<BTPacket>> packs;
+			packs.reserve(item.size());
+
+			std::cout << "item size: " << item.size() << std::endl;
+			for (int bt = 0; bt < item.size(); bt++)
 			{
-				std::cout << "Opus encoding failed: " << encodedBytes << std::endl;
-				break;
+				std::vector<float> processed;
+				for (int i = 0; i < frameCount; i++) {
+					float inLeft = item[bt][i * 2];
+					float inRight = item[bt][i * 2 + 1];
+
+					pData->LowPassStateLeft = kOneMinusAlpha * inLeft + kLowPassAlpha * pData->LowPassStateLeft;
+					pData->LowPassStateRight = kOneMinusAlpha * inRight + kLowPassAlpha * pData->LowPassStateRight;
+
+					float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
+					float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
+					processed.push_back(outLeft);
+					processed.push_back(outRight);
+				}
+
+				std::cout << "Opus encoding: " <<  std::endl;
+				std::vector<uint8_t>  opData = std::vector<uint8_t>(200);
+				int encodedBytes = opus_encode_float(encoder, processed.data(), processed.size() / 2, opData.data(), 200);
+				if (encodedBytes <= 0)
+				{
+					std::cout << "Opus encoding failed: " << encodedBytes << std::endl;
+					continue;
+				}
+
+				std::vector<uint8_t> hapticsData(60);
+
+				BTPacket packet;
+				packet.opus = processed;
+				packet.signal = opData;
+				packet.haptics = hapticsData;
+				packs.push_back({packet});
+				std::cout << "btAccumulator popped" << std::endl;
 			}
-
-			std::vector<uint8_t> hapticsData(60);
-			for (int i = 0; i < 30; ++i)
-			{
-				int srcIdx = i * 16;
-				float left = item[srcIdx * 2];
-				float right = item[srcIdx * 2 + 1];
-
-				hapticsData[i * 2] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(left * 127.0f)), -128, 127));
-				hapticsData[i * 2 + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(right * 127.0f)), -128, 127));
-			}
-			packet.haptics = hapticsData;
-			pData->btPacketQueue.push(packet);
-
-			/// Test
-			// static int packCount = 0;
-			// if (packCount == 0)
-			// {
-			// 	samples.pack1 = packet;
-			// 	packCount++;
-			// } else if (packCount == 1)
-			// {
-			// 	samples.pack2 = packet;
-			// 	packCount = 0;
-			// 	break;
-			// }
+			std::cout << "Pack size: " << packs.size() << std::endl;
+			pData->btPacketQueue.push(packs[0][0]);
+			pData->btPacketQueue.push(packs[1][0]);
 		}
-
-		// pData->btPacketQueue.push(samples.pack1);
-		// pData->btPacketQueue.push(samples.pack2);
 	}
-
-	pData->framesPlayed += framesRead;
 }
 #endif
 
+static BTPacket checkLocal;
 // Consume haptics queue and send to controller
 void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& callbackData)
 {
@@ -261,7 +258,10 @@ void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& c
 		BTPacket chunk;
 		while (callbackData.btPacketQueue.pop(chunk))
 		{
-			AudioHaptics->AudioHapticUpdate(chunk.haptics, chunk.opus);
+			AudioHaptics->AudioHapticUpdate(chunk.haptics, chunk.signal);
+			// checkLocal.opus = chunk.opus;
+			// checkLocal.haptics = ;
+			// checkLocal.signal = ;
 		}
 	}
 	else
@@ -370,7 +370,7 @@ private:
 			}
 
 #if GAMEPAD_CORE_HAS_AUDIO
-			ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
+			ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 16000);
 			if (ma_decoder_init_file(WavFilePath.c_str(), &decoderConfig, &decoder) == MA_SUCCESS)
 			{
 				ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
@@ -411,7 +411,7 @@ private:
 			deviceConfig.playback.channels = 2;
 		}
 
-		deviceConfig.sampleRate = 48000;
+		deviceConfig.sampleRate = 16000;
 		deviceConfig.dataCallback = audio_data_callback;
 		deviceConfig.pUserData = &callbackData;
 
@@ -503,7 +503,7 @@ struct FAudioDeviceContext
 	using AudioFrameCountType = ma_uint32;
 
 	int NumChannels = 2;
-	int SampleRate = 48000;
+	int SampleRate = 16000;
 	bool bInitialized = false;
 	bool bHasDeviceId = false;
 	bool bRingBufferInitialized = false;
@@ -563,12 +563,12 @@ struct FAudioDeviceContext
 		}
 	}
 
-	bool Initialize(int InSampleRate = 48000, int InNumChannels = 4)
+	bool Initialize(int InSampleRate = 16000, int InNumChannels = 2)
 	{
 		return InitializeWithDeviceId(nullptr, InSampleRate, InNumChannels);
 	}
 
-	bool InitializeWithDeviceId(const AudioDeviceIdType* pDeviceId, int InSampleRate = 48000, int InNumChannels = 4)
+	bool InitializeWithDeviceId(const AudioDeviceIdType* pDeviceId, int InSampleRate = 16000, int InNumChannels = 2)
 	{
 		if (bInitialized)
 		{
@@ -874,7 +874,7 @@ void print_help()
 [[noreturn]] int main(int argc, char* argv[])
 {
 	int error = 0;
-	encoder = opus_encoder_create(48000, 2, OPUS_APPLICATION_AUDIO, &error);
+	encoder = opus_encoder_create(16000, 2, OPUS_APPLICATION_AUDIO, &error);
 	if (error)
 	{
 		std::cerr << "Failed to create Opus encoder: " << error << std::endl;
@@ -882,12 +882,23 @@ void print_help()
 	}
 
 	opus_encoder_ctl(encoder, OPUS_SET_EXPERT_FRAME_DURATION(OPUS_FRAMESIZE_10_MS));
-	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(160000)); // 240kbps
-	opus_encoder_ctl(encoder, OPUS_SET_VBR(0));
-	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
-	opus_encoder_ctl(encoder, OPUS_SET_SIGNAL(OPUS_GET_SIGNAL_REQUEST));
+	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(OPUS_BITRATE_MAX)); //
+	opus_encoder_ctl(encoder, OPUS_SET_VBR(1));
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(5));
+	opus_encoder_ctl(encoder, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
+	opus_encoder_ctl(encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
+	opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC(0));
 	opus_encoder_ctl(encoder, OPUS_SET_PREDICTION_DISABLED(1));
-	opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC(50));
+
+	int ret;
+	ret = opus_encoder_ctl(encoder, OPUS_SET_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
+	if (ret != OPUS_OK) return ret;
+
+	opus_int32 rate;
+	opus_encoder_ctl(encoder, OPUS_GET_BANDWIDTH(&rate));
+
+	std::cout << "Opus encoder initialized with bandwidth: " << rate << std::endl;
+	opus_encoder_ctl(encoder, OPUS_RESET_STATE);
 
 	std::string WavFilePath;
 	bool bUseSystemAudio = false;
@@ -933,7 +944,7 @@ void print_help()
 
 #if GAMEPAD_CORE_HAS_AUDIO
 		// Initialize decoder (output as float, stereo, 48kHz)
-		ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
+		ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 16000);
 
 		if (ma_decoder_init_file(WavFilePath.c_str(), &decoderConfig, &decoder) != MA_SUCCESS)
 		{
@@ -976,7 +987,6 @@ void print_help()
 	IAudioDevice::SetInstance(AudioRegistry.get());
 
 	std::cout << "[System] Waiting for controller connection via USB/BT..." << std::endl;
-
 	std::unordered_map<uint32_t, std::unique_ptr<gamepad_audio_worker>> ActiveWorkers;
 
 	bool IsWorked = false;
@@ -1028,26 +1038,27 @@ void print_help()
 //
 	while (true)
 	{
+		gc_sync::sleep_for(std::chrono::milliseconds(13));
 		// Clean up finished or disconnected workers
-		// for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
-		// {
-		// 	bool bIsConnected = false;
-		// 	IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
-		// 	if (Gamepad && Gamepad->IsConnected())
-		// 	{
-		// 		bIsConnected = true;
-		// 	}
-		//
-		// 	if (it->second->is_finished() || !bIsConnected)
-		// 	{
-		// 		std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
-		// 		it = ActiveWorkers.erase(it);
-		// 	}
-		// 	else
-		// 	{
-		// 		++it;
-		// 	}
-		// }
+		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
+		{
+			bool bIsConnected = false;
+			IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
+			if (Gamepad && Gamepad->IsConnected())
+			{
+				bIsConnected = true;
+			}
+
+			if (it->second->is_finished() || !bIsConnected)
+			{
+				std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
+				it = ActiveWorkers.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
 #ifdef AUTOMATED_TESTS
 		static auto StartTime = std::chrono::steady_clock::now();
 		auto Now = std::chrono::steady_clock::now();
