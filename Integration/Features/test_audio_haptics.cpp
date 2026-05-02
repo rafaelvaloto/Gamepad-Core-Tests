@@ -217,6 +217,9 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 					pData->LowPassStateLeft = kOneMinusAlpha * inLeft + kLowPassAlpha * pData->LowPassStateLeft;
 					pData->LowPassStateRight = kOneMinusAlpha * inRight + kLowPassAlpha * pData->LowPassStateRight;
 
+					if (std::isnan(inLeft) || std::isnan(inRight))
+						continue;
+
 					float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
 					float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
 					processed.push_back(outLeft);
@@ -240,16 +243,19 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 				packet.haptics = hapticsData;
 				packs.push_back({packet});
 				std::cout << "btAccumulator popped" << std::endl;
+				//pData->btPacketQueue.push(packet);
+				std::cout << "Packet queued" << std::endl;
 			}
-			std::cout << "Pack size: " << packs.size() << std::endl;
+			// std::cout << "Pack size: " << packs.size() << std::endl;
 			pData->btPacketQueue.push(packs[0][0]);
 			pData->btPacketQueue.push(packs[1][0]);
+			// pData->btPacketQueue.push(packs[2][0]);
+			// pData->btPacketQueue.push(packs[3][0]);
 		}
 	}
 }
 #endif
 
-static BTPacket checkLocal;
 // Consume haptics queue and send to controller
 void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& callbackData)
 {
@@ -259,9 +265,6 @@ void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& c
 		while (callbackData.btPacketQueue.pop(chunk))
 		{
 			AudioHaptics->AudioHapticUpdate(chunk.haptics, chunk.signal);
-			// checkLocal.opus = chunk.opus;
-			// checkLocal.haptics = ;
-			// checkLocal.signal = ;
 		}
 	}
 	else
@@ -329,10 +332,6 @@ private:
 			return;
 		}
 
-		int32_t DeviceId = -1; // We don't have the engine ID here easily, but we have the gamepad pointer
-
-		std::cout << "[Worker] Starting audio worker for controller..." << std::endl;
-
 		bool bIsWireless = Gamepad->GetConnectionType() == EDSDeviceConnection::Bluetooth;
 
 		// Get Audio Haptics interface
@@ -370,7 +369,7 @@ private:
 			}
 
 #if GAMEPAD_CORE_HAS_AUDIO
-			ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 16000);
+			ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
 			if (ma_decoder_init_file(WavFilePath.c_str(), &decoderConfig, &decoder) == MA_SUCCESS)
 			{
 				ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
@@ -411,7 +410,7 @@ private:
 			deviceConfig.playback.channels = 2;
 		}
 
-		deviceConfig.sampleRate = 16000;
+		deviceConfig.sampleRate = 48000;
 		deviceConfig.dataCallback = audio_data_callback;
 		deviceConfig.pUserData = &callbackData;
 
@@ -503,7 +502,7 @@ struct FAudioDeviceContext
 	using AudioFrameCountType = ma_uint32;
 
 	int NumChannels = 2;
-	int SampleRate = 16000;
+	int SampleRate = 48000;
 	bool bInitialized = false;
 	bool bHasDeviceId = false;
 	bool bRingBufferInitialized = false;
@@ -532,10 +531,6 @@ struct FAudioDeviceContext
 		AudioFrameCountType framesAvailable = ma_pcm_rb_available_read(&pContext->RingBuffer);
 		AudioFrameCountType framesToRead = frameCount;
 
-		std::cout << "[AudioPolicy] Audio data framesAvailable: " << framesAvailable << std::endl;
-		std::cout << "[AudioPolicy] Audio data framesToRead: " << framesToRead << std::endl;
-		std::cout << "[AudioPolicy] Audio data framesToRead: " << frameCount << std::endl;
-
 		if (framesAvailable < framesToRead)
 		{
 			framesToRead = framesAvailable;
@@ -555,7 +550,6 @@ struct FAudioDeviceContext
 		{
 
 			std::cout << "[AudioPolicy] Audio data framesToRead < frameCount: " << (framesToRead < frameCount) << std::endl;
-
 			auto pOutputFloat = static_cast<float*>(pOutput);
 			AudioFrameCountType framesMissing = frameCount - framesToRead;
 			std::memset(&pOutputFloat[framesToRead * pContext->NumChannels], 0,
@@ -563,12 +557,12 @@ struct FAudioDeviceContext
 		}
 	}
 
-	bool Initialize(int InSampleRate = 16000, int InNumChannels = 2)
+	bool Initialize(int InSampleRate = 48000, int InNumChannels = 2)
 	{
 		return InitializeWithDeviceId(nullptr, InSampleRate, InNumChannels);
 	}
 
-	bool InitializeWithDeviceId(const AudioDeviceIdType* pDeviceId, int InSampleRate = 16000, int InNumChannels = 2)
+	bool InitializeWithDeviceId(const AudioDeviceIdType* pDeviceId, int InSampleRate = 48000, int InNumChannels = 2)
 	{
 		if (bInitialized)
 		{
@@ -727,7 +721,7 @@ public:
 		return Instance;
 	}
 
-	void RegisterAudioDevice(DevicePathType Path, const AudioDeviceIdType* id)
+	void RegisterAudioDevice(const DevicePathType& Path, const AudioDeviceIdType* id)
 	{
 		auto Policy = std::make_shared<FAudioDeviceContext>();
 		Policy->DevicePath = Path;
@@ -743,7 +737,7 @@ public:
 		DevicePolicies[Path] = std::move(Policy);
 	}
 
-	void UnregisterAudioDevice(DevicePathType Path) override
+	void UnregisterAudioDevice(const DevicePathType Path) override
 	{
 		DevicePolicies.erase(Path);
 	}
@@ -771,12 +765,10 @@ public:
 
 		if (const auto it = DevicePolicies.find(Context->Path); it != DevicePolicies.end())
 		{
-			// Already initialized for this path
 			return;
 		}
 
 		std::cout << "[AudioPolicy] Initializing audio for context: " << Context->Path << std::endl;
-
 		ma_result result;
 		ma_context maContext;
 		result = ma_context_init(nullptr, 0, nullptr, &maContext);
@@ -803,7 +795,6 @@ public:
 		std::cout << "[AudioPolicy] Target Device Container ID: " << TargetContainerId << std::endl;
 
 		const ma_device_id* pFoundDeviceId = nullptr;
-
 		for (ma_uint32 i = 0; i < playbackCount; i++)
 		{
 			std::string AudioContainerId = windows_device_info::get_audio_container_id(pPlaybackInfos[i].id.wasapi);
@@ -868,13 +859,11 @@ void print_help()
 	std::cout << "=======================================================" << std::endl;
 }
 
-// ============================================================================
-// Main Entry Point
-// ============================================================================
-[[noreturn]] int main(int argc, char* argv[])
+
+int main(int argc, char* argv[])
 {
 	int error = 0;
-	encoder = opus_encoder_create(16000, 2, OPUS_APPLICATION_AUDIO, &error);
+	encoder = opus_encoder_create(48000, 2, OPUS_APPLICATION_AUDIO, &error);
 	if (error)
 	{
 		std::cerr << "Failed to create Opus encoder: " << error << std::endl;
@@ -882,13 +871,14 @@ void print_help()
 	}
 
 	opus_encoder_ctl(encoder, OPUS_SET_EXPERT_FRAME_DURATION(OPUS_FRAMESIZE_10_MS));
-	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(OPUS_BITRATE_MAX)); //
-	opus_encoder_ctl(encoder, OPUS_SET_VBR(1));
-	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(5));
-	opus_encoder_ctl(encoder, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
+	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(166000)); //
+	opus_encoder_ctl(encoder, OPUS_SET_VBR(0));
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(0));
+
+	opus_encoder_ctl(encoder, OPUS_SET_PREDICTION_DISABLED(0));
+	opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC(80));
 	opus_encoder_ctl(encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
-	opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC(0));
-	opus_encoder_ctl(encoder, OPUS_SET_PREDICTION_DISABLED(1));
+	opus_encoder_ctl(encoder, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
 
 	int ret;
 	ret = opus_encoder_ctl(encoder, OPUS_SET_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
@@ -944,7 +934,7 @@ void print_help()
 
 #if GAMEPAD_CORE_HAS_AUDIO
 		// Initialize decoder (output as float, stereo, 48kHz)
-		ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 16000);
+		ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
 
 		if (ma_decoder_init_file(WavFilePath.c_str(), &decoderConfig, &decoder) != MA_SUCCESS)
 		{
@@ -1038,7 +1028,7 @@ void print_help()
 //
 	while (true)
 	{
-		gc_sync::sleep_for(std::chrono::milliseconds(13));
+		//gc_sync::sleep_for(std::chrono::milliseconds(16));
 		// Clean up finished or disconnected workers
 		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
 		{

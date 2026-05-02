@@ -253,7 +253,7 @@ void windows_device_info::invalidate_handle(FDeviceContext* Context)
 
 		std::memset(Context->Buffer, 0, sizeof(Context->Buffer));
 		std::memset(Context->BufferDS4, 0, sizeof(Context->BufferDS4));
-		std::memset(Context->BufferAudio, 0, sizeof(Context->BufferAudio));
+		std::memset(Context->BufferHapitcs, 0, sizeof(Context->BufferHapitcs));
 
 		unsigned char* RawOutput = Context->GetRawOutputBuffer();
 		std::memset(RawOutput, 0, 78);
@@ -403,7 +403,7 @@ void windows_device_info::process_audio_haptic(FDeviceContext* Context)
 	std::cout << "WriteFile : " << std::endl;
 	unsigned long BytesWritten = 0;
 	size_t BufferSize = 0;
-	if (Context->BufferAudio[0] == 0x32)
+	if (Context->BufferHapitcs[0] == 0x32)
 	{
 		 BufferSize = 142;
 	}
@@ -412,7 +412,7 @@ void windows_device_info::process_audio_haptic(FDeviceContext* Context)
 		BufferSize = 398;
 	}
 
-	if (!WriteFile(Context->Handle, Context->BufferAudio, (DWORD)BufferSize, &BytesWritten, nullptr))
+	if (!WriteFile(Context->Handle, Context->BufferHapitcs, (DWORD)BufferSize, &BytesWritten, nullptr))
 	{
 		const unsigned long Error = GetLastError();
 		if (Error != ERROR_IO_PENDING)
