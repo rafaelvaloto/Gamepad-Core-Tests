@@ -73,6 +73,7 @@ target_link_libraries(test-audio-haptics
         PRIVATE
         GamepadCore
         GamepadCoreTestCommon
+        opus
 )
 
 target_link_libraries(test-channels-haptics

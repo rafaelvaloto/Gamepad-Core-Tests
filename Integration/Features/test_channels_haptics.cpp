@@ -24,8 +24,10 @@ namespace fs = std::filesystem;
 #if GAMEPAD_CORE_HAS_AUDIO
 #include "miniaudio.h"
 #endif
-#include "GCore/Interfaces/IPlatformHardwareInfo.h"
-#include "GCore/Interfaces/Segregations/IGamepadAudioHaptics.h"
+#include "GCore/Interfaces/Segregations/IGamepadBase.h"
+#include "GCore/Interfaces/IPlatformHardware.h"
+#include "GCore/Interfaces/Segregations/IGamepadHaptics.h"
+#include "GCore/Templates/TAudioDeviceRegistry.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include "GImplementations/Utils/GamepadAudio.h"
@@ -286,7 +288,7 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 }
 #endif
 
-void consume_haptics_queue(IGamepadAudioHaptics* AudioHaptics, audio_callback_data& callbackData)
+void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& callbackData)
 {
 	if (callbackData.bIsWireless)
 	{
@@ -321,7 +323,7 @@ void consume_haptics_queue(IGamepadAudioHaptics* AudioHaptics, audio_callback_da
 class gamepad_audio_worker
 {
 public:
-	gamepad_audio_worker(ISonyGamepad* InGamepad, const std::string& InWavPath, bool InUseSystemAudio)
+	gamepad_audio_worker(IGamepadBase* InGamepad, const std::string& InWavPath, bool InUseSystemAudio)
 	    : Gamepad(InGamepad)
 	    , WavFilePath(InWavPath)
 	    , bUseSystemAudio(InUseSystemAudio)
@@ -355,7 +357,7 @@ private:
 		std::cout << "[Worker] Starting audio worker for controller (File: " << (bUseSystemAudio ? "System Audio" : WavFilePath) << ")..." << std::endl;
 
 		bool bIsWireless = Gamepad->GetConnectionType() == EDSDeviceConnection::Bluetooth;
-		IGamepadAudioHaptics* AudioHaptics = Gamepad->GetIGamepadHaptics();
+		IGamepadHaptics* AudioHaptics = Gamepad->GetIGamepadHaptics();
 		if (!AudioHaptics)
 		{
 			return;
@@ -364,10 +366,7 @@ private:
 		FDeviceContext* Context = Gamepad->GetMutableDeviceContext();
 		if (!bIsWireless && Context)
 		{
-			if (!Context->AudioContext || !Context->AudioContext->IsValid())
-			{
-				IPlatformHardwareInfo::Get().InitializeAudioDevice(Context);
-			}
+			IPlatformHardware::Get().InitializeAudioDevice(Context);
 		}
 
 #if GAMEPAD_CORE_HAS_AUDIO
@@ -468,21 +467,362 @@ private:
 		bFinished.store(true);
 	}
 
-	ISonyGamepad* Gamepad;
+	IGamepadBase* Gamepad;
 	std::string WavFilePath;
 	bool bUseSystemAudio;
 	std::atomic<bool> bFinished;
 	std::thread WorkerThread;
 };
 
+/**
+ * @brief Audio device context using miniaudio for cross-platform audio playback.
+ */
+struct FAudioDeviceContext
+{
+	using DevicePathType = std::string;
+	using AudioDeviceType = ma_device;
+	using AudioDeviceIdType = ma_device_id;
+	using AudioRingBufferType = ma_pcm_rb;
+	using AudioFrameCountType = ma_uint32;
+
+	int NumChannels = 4;
+	int SampleRate = 48000;
+	bool bInitialized = false;
+	bool bHasDeviceId = false;
+	bool bRingBufferInitialized = false;
+
+	DevicePathType DevicePath;
+	AudioDeviceType Device{};
+	AudioRingBufferType RingBuffer{};
+	const AudioDeviceIdType* DeviceId = nullptr;
+
+	FAudioDeviceContext() = default;
+
+	~FAudioDeviceContext()
+	{
+		Close();
+	}
+
+	static void DataCallback(AudioDeviceType* pDevice, void* pOutput, const void* /*pInput*/, AudioFrameCountType frameCount)
+	{
+		auto pContext = static_cast<FAudioDeviceContext*>(pDevice->pUserData);
+		if (!pContext || !pContext->bInitialized)
+		{
+			std::memset(pOutput, 0, frameCount * pDevice->playback.channels * sizeof(float));
+			return;
+		}
+
+		AudioFrameCountType framesAvailable = ma_pcm_rb_available_read(&pContext->RingBuffer);
+		AudioFrameCountType framesToRead = frameCount;
+
+		if (framesAvailable < framesToRead)
+		{
+			framesToRead = framesAvailable;
+		}
+
+		if (framesToRead > 0)
+		{
+			void* pReadBuffer;
+			AudioFrameCountType readSize = framesToRead;
+			ma_pcm_rb_acquire_read(&pContext->RingBuffer, &readSize, &pReadBuffer);
+
+			std::memcpy(pOutput, pReadBuffer, readSize * pContext->NumChannels * sizeof(float));
+
+			ma_pcm_rb_commit_read(&pContext->RingBuffer, readSize);
+		}
+
+		if (framesToRead < frameCount)
+		{
+			auto pOutputFloat = static_cast<float*>(pOutput);
+			AudioFrameCountType framesMissing = frameCount - framesToRead;
+
+			std::memset(&pOutputFloat[framesToRead * pContext->NumChannels], 0,
+			            framesMissing * pContext->NumChannels * sizeof(float));
+		}
+	}
+
+	bool Initialize(int InSampleRate = 48000, int InNumChannels = 4)
+	{
+		return InitializeWithDeviceId(nullptr, InSampleRate, InNumChannels);
+	}
+
+	bool InitializeWithDeviceId(const AudioDeviceIdType* pDeviceId, int InSampleRate = 48000, int InNumChannels = 4)
+	{
+		if (bInitialized)
+		{
+			Close();
+		}
+
+		if (pDeviceId)
+		{
+			DeviceId = pDeviceId;
+			bHasDeviceId = true;
+		}
+		else
+		{
+			DeviceId = nullptr;
+			bHasDeviceId = false;
+		}
+
+		SampleRate = InSampleRate;
+		NumChannels = InNumChannels;
+		auto bufferSizeInFrames = static_cast<AudioFrameCountType>(SampleRate);
+
+		if (ma_pcm_rb_init(ma_format_f32, NumChannels, bufferSizeInFrames, nullptr, nullptr, &RingBuffer) != MA_SUCCESS)
+		{
+			return false;
+		}
+		bRingBufferInitialized = true;
+
+		ma_device_config Config = ma_device_config_init(ma_device_type_playback);
+		Config.playback.format = ma_format_f32;
+		Config.playback.channels = NumChannels;
+		Config.playback.pDeviceID = DeviceId;
+		Config.sampleRate = SampleRate;
+		Config.dataCallback = DataCallback;
+		Config.pUserData = this;
+
+		if (ma_device_init(nullptr, &Config, &Device) != MA_SUCCESS)
+		{
+			ma_pcm_rb_uninit(&RingBuffer);
+			bRingBufferInitialized = false;
+			return false;
+		}
+
+		if (ma_device_start(&Device) != MA_SUCCESS)
+		{
+			ma_device_uninit(&Device);
+			ma_pcm_rb_uninit(&RingBuffer);
+			bRingBufferInitialized = false;
+			return false;
+		}
+
+		bInitialized = true;
+		return true;
+	}
+
+	void Close()
+	{
+		if (bInitialized)
+		{
+			ma_device_stop(&Device);
+			ma_device_uninit(&Device);
+			bInitialized = false;
+		}
+		if (bRingBufferInitialized)
+		{
+			ma_pcm_rb_uninit(&RingBuffer);
+			bRingBufferInitialized = false;
+		}
+	}
+
+	[[nodiscard]] bool IsValid() const
+	{
+		return bInitialized && bRingBufferInitialized;
+	}
+
+	AudioFrameCountType GetAvailableWriteFrames()
+	{
+		if (!bRingBufferInitialized)
+		{
+			return 0;
+		}
+		return ma_pcm_rb_available_write(&RingBuffer);
+	}
+
+	bool WriteHapticData(const std::vector<std::int16_t>& InterleavedData)
+	{
+		if (!IsValid() || InterleavedData.empty())
+		{
+			return false;
+		}
+		auto framesInput = static_cast<AudioFrameCountType>(InterleavedData.size() / 2);
+
+		AudioFrameCountType framesAvailable = ma_pcm_rb_available_write(&RingBuffer);
+		AudioFrameCountType framesToWrite = (framesInput > framesAvailable) ? framesAvailable : framesInput;
+
+		if (framesToWrite == 0)
+		{
+			return true;
+		}
+
+		void* pWriteBufferPtr;
+		if (ma_pcm_rb_acquire_write(&RingBuffer, &framesToWrite, &pWriteBufferPtr) != MA_SUCCESS)
+		{
+			return false;
+		}
+
+		auto* pOutputBuffer = static_cast<float*>(pWriteBufferPtr);
+		constexpr float kNormalization = 1.0f / 32768.0f;
+		for (AudioFrameCountType i = 0; i < framesToWrite; i++)
+		{
+			float LeftFloat = static_cast<float>(InterleavedData[i * 2]) * kNormalization;
+			float RightFloat = static_cast<float>(InterleavedData[(i * 2) + 1]) * kNormalization;
+			AudioFrameCountType baseIndex = i * NumChannels;
+
+			if (NumChannels >= 4)
+			{
+				pOutputBuffer[baseIndex + 0] = 0.f;
+				pOutputBuffer[baseIndex + 1] = 0.f;
+				pOutputBuffer[baseIndex + 2] = LeftFloat;
+				pOutputBuffer[baseIndex + 3] = RightFloat;
+			}
+			else
+			{
+				pOutputBuffer[baseIndex + 0] = LeftFloat;
+				pOutputBuffer[baseIndex + 1] = RightFloat;
+			}
+		}
+
+		ma_pcm_rb_commit_write(&RingBuffer, framesToWrite);
+		return true;
+	}
+};
+
+class test_audio_device_registry : public IAudioDevice
+{
+public:
+	using DevicePathType = std::string;
+	using AudioDeviceIdType = ma_device_id;
+	using AudioRingBufferType = ma_pcm_rb;
+	using AudioFrameCountType = ma_uint32;
+	using AudioDeviceType = ma_device;
+
+	std::unordered_map<DevicePathType, std::shared_ptr<FAudioDeviceContext>> DevicePolicies;
+
+	test_audio_device_registry()
+	{
+		SetInstance(this);
+	}
+
+	void RegisterAudioDevice(DevicePathType Path, const AudioDeviceIdType* id)
+	{
+		auto Policy = std::make_shared<FAudioDeviceContext>();
+		Policy->DevicePath = Path;
+		if (id)
+		{
+			Policy->DeviceId = id;
+			Policy->InitializeWithDeviceId(Policy->DeviceId, Policy->SampleRate, Policy->NumChannels);
+		}
+		else
+		{
+			Policy->Initialize(Policy->SampleRate, Policy->NumChannels);
+		}
+		DevicePolicies[Path] = std::move(Policy);
+	}
+
+	void UnregisterAudioDevice(DevicePathType Path) override
+	{
+		DevicePolicies.erase(Path);
+	}
+
+	void ProcessAudioHaptic(FDeviceContext* Context, const std::vector<std::int16_t>& AudioData) override
+	{
+		if (!Context)
+		{
+			return;
+		}
+
+		if (const auto it = DevicePolicies.find(Context->Path); it != DevicePolicies.end())
+		{
+			it->second->WriteHapticData(AudioData);
+		}
+	}
+
+	void InitializeAudioContainer(FDeviceContext* Context) override
+	{
+		if (!Context)
+		{
+			std::cerr << "[AudioPolicy] Error: Context is null" << std::endl;
+			return;
+		}
+
+		if (const auto it = DevicePolicies.find(Context->Path); it != DevicePolicies.end())
+		{
+			return;
+		}
+
+		std::cout << "[AudioPolicy] Initializing audio for context: " << Context->Path << std::endl;
+
+		ma_result result;
+		ma_context maContext;
+		result = ma_context_init(nullptr, 0, nullptr, &maContext);
+		if (result != MA_SUCCESS)
+		{
+			std::cerr << "[AudioPolicy] Error: Failed to initialize miniaudio context: " << result << std::endl;
+			return;
+		}
+
+		ma_device_info* pPlaybackInfos;
+		ma_uint32 playbackCount;
+		ma_device_info* pCaptureInfos;
+		ma_uint32 captureCount;
+
+		result = ma_context_get_devices(&maContext, &pPlaybackInfos, &playbackCount, &pCaptureInfos, &captureCount);
+		if (result != MA_SUCCESS)
+		{
+			std::cerr << "[AudioPolicy] Error: Failed to get devices: " << result << std::endl;
+			ma_context_uninit(&maContext);
+			return;
+		}
+
+		std::string TargetContainerId = windows_device_info::get_container_id(Context->Path);
+		std::cout << "[AudioPolicy] Target Device Container ID: " << TargetContainerId << std::endl;
+
+		const ma_device_id* pFoundDeviceId = nullptr;
+
+		for (ma_uint32 i = 0; i < playbackCount; i++)
+		{
+			std::string AudioContainerId = windows_device_info::get_audio_container_id(pPlaybackInfos[i].id.wasapi);
+			std::cout << "[AudioPolicy] Checking device: " << pPlaybackInfos[i].name 
+			          << " | Container ID: " << AudioContainerId << std::endl;
+
+			if (!AudioContainerId.empty() && AudioContainerId == TargetContainerId)
+			{
+				pFoundDeviceId = &pPlaybackInfos[i].id;
+				std::cout << "[AudioPolicy] Found match by Container ID: " << pPlaybackInfos[i].name << std::endl;
+				break;
+			}
+		}
+
+		if (!pFoundDeviceId)
+		{
+			std::cout << "[AudioPolicy] No match by Container ID. Falling back to name search..." << std::endl;
+			for (ma_uint32 i = 0; i < playbackCount; i++)
+			{
+				std::string deviceName(pPlaybackInfos[i].name);
+				if (deviceName.find("DualSense") != std::string::npos ||
+				    deviceName.find("Wireless Controller") != std::string::npos)
+				{
+					pFoundDeviceId = &pPlaybackInfos[i].id;
+					std::cout << "[AudioPolicy] Found potential match by name: " << pPlaybackInfos[i].name << std::endl;
+					break;
+				}
+			}
+		}
+
+		if (pFoundDeviceId)
+		{
+			RegisterAudioDevice(Context->Path, pFoundDeviceId);
+			std::cout << "[AudioPolicy] Successfully registered audio device for " << Context->Path << std::endl;
+		}
+		else
+		{
+			std::cerr << "[AudioPolicy] Warning: Could not find any DualSense audio device." << std::endl;
+		}
+
+		ma_context_uninit(&maContext);
+	}
+};
+
 struct audio_test_registry_policy : public test_utils::test_registry_policy
 {
 	std::vector<uint32_t> NewGamepads;
- gc_lock::mutex NewGamepadsMutex;
+	gc_lock::mutex PolicyMutex;
 
 	void DispatchNewGamepad(uint32_t GamepadId)
 	{
-  gc_lock::lock_guard<gc_lock::mutex> Lock(NewGamepadsMutex);
+		gc_lock::lock_guard<gc_lock::mutex> Lock(PolicyMutex);
 		NewGamepads.push_back(GamepadId);
 		std::cout << "[Policy] New Gamepad Registered: " << GamepadId << std::endl;
 	}
@@ -534,8 +874,12 @@ int main(int argc, char* argv[])
 #else
 	using platform_hardware = linux_platform::linux_hardware;
 #endif
-	IPlatformHardwareInfo::SetInstance(std::make_unique<platform_hardware>());
+	IPlatformHardware::SetInstance(std::make_unique<platform_hardware>());
 	auto Registry = std::make_unique<audio_test_device_registry>();
+
+	// IMPORTANT: Keep AudioRegistry alive throughout the test
+	auto AudioRegistry = std::make_unique<test_audio_device_registry>();
+	IAudioDevice::SetInstance(AudioRegistry.get());
 
 	std::unordered_map<uint32_t, std::unique_ptr<gamepad_audio_worker>> ActiveWorkers;
 
@@ -545,29 +889,36 @@ int main(int argc, char* argv[])
 		Registry->PlugAndPlay(0.016f);
 
 		{
-   gc_lock::lock_guard<gc_lock::mutex> Lock(Registry->Policy.NewGamepadsMutex);
-			for (int32_t GamepadId : Registry->Policy.NewGamepads)
+			gc_lock::lock_guard<gc_lock::mutex> Lock(Registry->Policy.PolicyMutex);
+			for (uint32_t GamepadId : Registry->Policy.NewGamepads)
 			{
-				ISonyGamepad* Gamepad = Registry->GetLibrary(GamepadId);
-				if (GamepadId == 1 && Gamepad)
-				{
-					Gamepad->SetLightbar({200, 255, 0});
-					Gamepad->SetPlayerLed(EDSPlayer::Two, 0xff);
-					Gamepad->DualSenseSettings(0, 0, 1, 0, 0xff, 0xFC, 0, 0);
-					Gamepad->UpdateOutput();
-					std::this_thread::sleep_for(std::chrono::seconds(1));
-				}
-				else if (GamepadId == 0 && Gamepad)
-				{
-					Gamepad->SetLightbar({0, 255, 255});
-					Gamepad->SetPlayerLed(EDSPlayer::One, 0xff);
-					Gamepad->DualSenseSettings(0, 0, 1, 0, 0xff, 0xFC, 0, 0);
-					Gamepad->UpdateOutput();
-					std::this_thread::sleep_for(std::chrono::seconds(1));
-				}
-
+				IGamepadBase* Gamepad = Registry->GetLibrary(GamepadId);
 				if (Gamepad)
 				{
+					// Initialize Audio for this gamepad
+					IAudioDevice::Get().InitializeAudioContainer(Gamepad->GetMutableDeviceContext());
+
+					if (GamepadId == 1)
+					{
+						if (auto* Lightbar = Gamepad->GetIGamepadLightbar())
+						{
+							Lightbar->SetLightbar({200, 255, 0});
+							Lightbar->SetPlayerLed(EDSPlayer::Two, 0xff);
+						}
+						Gamepad->UpdateOutput();
+						std::this_thread::sleep_for(std::chrono::seconds(1));
+					}
+					else if (GamepadId == 0)
+					{
+						if (auto* Lightbar = Gamepad->GetIGamepadLightbar())
+						{
+							Lightbar->SetLightbar({0, 255, 255});
+							Lightbar->SetPlayerLed(EDSPlayer::One, 0xff);
+						}
+						Gamepad->UpdateOutput();
+						std::this_thread::sleep_for(std::chrono::seconds(1));
+					}
+
 					std::string SelectedWav;
 					bool bLocalUseSystem = bUseSystemAudio;
 
@@ -594,7 +945,7 @@ int main(int argc, char* argv[])
 
 		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
 		{
-			ISonyGamepad* Gamepad = Registry->GetLibrary(it->first);
+			IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
 			if (it->second->is_finished() || !Gamepad || !Gamepad->IsConnected())
 			{
 				it = ActiveWorkers.erase(it);

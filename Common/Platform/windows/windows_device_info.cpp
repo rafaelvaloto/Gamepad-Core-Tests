@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Rafael Valoto. All rights reserved.
 #define _FUNCTIONDISCOVERYKEYS_DEV_PKEY_H_
 #include "windows_device_info.h"
+#include "GCore/Interfaces/IAudioDevice.h"
 #include <initguid.h>
 #include <iostream>
 #include <setupapi.h>
@@ -252,7 +253,7 @@ void windows_device_info::invalidate_handle(FDeviceContext* Context)
 
 		std::memset(Context->Buffer, 0, sizeof(Context->Buffer));
 		std::memset(Context->BufferDS4, 0, sizeof(Context->BufferDS4));
-		std::memset(Context->BufferAudio, 0, sizeof(Context->BufferAudio));
+		std::memset(Context->BufferHapitcs, 0, sizeof(Context->BufferHapitcs));
 
 		unsigned char* RawOutput = Context->GetRawOutputBuffer();
 		std::memset(RawOutput, 0, 78);
@@ -400,8 +401,17 @@ void windows_device_info::process_audio_haptic(FDeviceContext* Context)
 	}
 
 	unsigned long BytesWritten = 0;
-	constexpr size_t BufferSize = 142;
-	if (!WriteFile(Context->Handle, Context->BufferAudio, (DWORD)BufferSize, &BytesWritten, nullptr))
+	size_t BufferSize = 0;
+	if (Context->BufferHapitcs[0] == 0x32)
+	{
+		 BufferSize = 142;
+	}
+	else
+	{
+		BufferSize = 398;
+	}
+
+	if (!WriteFile(Context->Handle, Context->BufferHapitcs, (DWORD)BufferSize, &BytesWritten, nullptr))
 	{
 		const unsigned long Error = GetLastError();
 		if (Error != ERROR_IO_PENDING)
