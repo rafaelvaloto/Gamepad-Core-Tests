@@ -17,14 +17,8 @@
 #include <string>
 #include <vector>
 
-#if GAMEPAD_CORE_HAS_AUDIO
-#include "miniaudio.h"
-#endif
-
 #include "GCore/Interfaces/IAudioDevice.h"
-#include "GImplementations/Utils/GamepadAudio.h"
 using namespace GamepadCore;
-using namespace FGamepadAudio;
 
 namespace windows_platform
 {
