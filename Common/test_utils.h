@@ -59,6 +59,10 @@ namespace test_utils
 	    std::unique_ptr<IPlatformHardware>& OutHardware,
 	    std::unique_ptr<test_device_registry>& OutRegistry)
 	{
+		if (!OutHardware)
+		{
+			OutHardware = std::make_unique<platform_hardware>();
+		}
 		IPlatformHardware::SetInstance(std::move(OutHardware));
 		OutRegistry = std::make_unique<test_device_registry>();
 

@@ -84,7 +84,9 @@ int main()
 
 		if (Gamepad && Gamepad->IsConnected())
 		{
-			auto Trigger = Gamepad->GetIGamepadTrigger();
+			auto* Trigger = Gamepad->GetIGamepadTrigger();
+			auto* Lightbar = Gamepad->GetIGamepadLightbar();
+			auto* Rumbles = Gamepad->GetIGamepadRumbles();
 
 			bControllerFound = true;
 			if (!bWasConnected)
@@ -92,11 +94,14 @@ int main()
 				bWasConnected = true;
 				std::cout << ">>> CONTROLLER CONNECTED! <<<" << std::endl;
 
-				Gamepad->GetIGamepadLightbar()->SetLightbar({0, 255, 0});
-
-				if (Trigger)
+				if (Lightbar)
 				{
-					Gamepad->GetIGamepadLightbar()->SetPlayerLed(EDSPlayer::One, 255);
+					Lightbar->SetLightbar({0, 255, 0});
+				}
+
+				if (Trigger && Lightbar)
+				{
+					Lightbar->SetPlayerLed(EDSPlayer::One, 255);
 				}
 
 				print_controls_helper();
@@ -105,35 +110,42 @@ int main()
 
 			Gamepad->UpdateInput(DeltaTime);
 			FDeviceContext* Context = Gamepad->GetMutableDeviceContext();
+			if (!Context)
+			{
+				continue;
+			}
 			FInputContext* InputState = Context->GetInputState();
+			if (!InputState)
+			{
+				continue;
+			}
 
 			std::string StatusText;
 
 			if (InputState->bCross)
 			{
 				StatusText = "Cross";
-				Gamepad->GetIGamepadRumbles()->SetVibration(0, 200);
-				if (Trigger)
+				if (Rumbles && Lightbar)
 				{
-					Gamepad->GetIGamepadLightbar()->SetLightbar({255, 0, 0});
-				}
-				else
-				{
-					Gamepad->GetIGamepadLightbar()->SetLightbarFlash({255, 0, 0}, 0, 0);
+					Lightbar->SetLightbar({255, 0, 0});
+					Rumbles->SetVibration(0, 200);
 				}
 				Gamepad->UpdateOutput();
 			}
 			else if (InputState->bCircle)
 			{
 				StatusText = "Circle";
-				Gamepad->GetIGamepadRumbles()->SetVibration(100, 0);
-				if (Trigger)
+				if (Rumbles)
 				{
-					Gamepad->GetIGamepadLightbar()->SetLightbar({0, 0, 255});
+					Rumbles->SetVibration(100, 0);
 				}
-				else
+				if (Trigger && Lightbar)
 				{
-					Gamepad->GetIGamepadLightbar()->SetLightbarFlash({0, 0, 255}, 0, 0);
+					Lightbar->SetLightbar({0, 0, 255});
+				}
+				else if (Lightbar)
+				{
+					Lightbar->SetLightbarFlash({0, 0, 255}, 0, 0);
 				}
 				Gamepad->UpdateOutput();
 			}
@@ -260,22 +272,28 @@ int main()
 				StatusText = "Triangle";
 				bWasDebugAnalog = !bWasDebugAnalog;
 
-				Gamepad->GetIGamepadRumbles()->SetVibration(0, 0);
-				if (Trigger)
+				if (Rumbles)
 				{
-					Gamepad->GetIGamepadLightbar()->SetLightbar({0, 255, 0});
+					Rumbles->SetVibration(0, 0);
+				}
+				if (Trigger && Lightbar)
+				{
+					Lightbar->SetLightbar({0, 255, 0});
 					Trigger->StopTrigger(EDSGamepadHand::Left);
 					Trigger->StopTrigger(EDSGamepadHand::Right);
 				}
-				else
+				else if (Lightbar)
 				{
-					Gamepad->GetIGamepadLightbar()->SetLightbarFlash({0, 255, 0}, 0, 0);
+					Lightbar->SetLightbarFlash({0, 255, 0}, 0, 0);
 				}
 				Gamepad->UpdateOutput();
 			}
 			else
 			{
-				Gamepad->GetIGamepadRumbles()->SetVibration(0, 0);
+				if (Rumbles)
+				{
+					Rumbles->SetVibration(0, 0);
+				}
 				Gamepad->UpdateOutput();
 			}
 
