@@ -4,7 +4,9 @@
 #include "GCore/Templates/TGenericHardwareInfo.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include "GCore/Utils/SoDefines.h"
+#if GAMEPAD_CORE_HAS_AUDIO
 #include "miniaudio.h"
+#endif
 #include "windows_device_info.h"
 #include <algorithm>
 #include <cstring>
