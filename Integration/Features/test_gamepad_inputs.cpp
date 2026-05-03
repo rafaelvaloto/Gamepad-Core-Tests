@@ -94,20 +94,33 @@ int main(int argc, char* argv[])
 
 				if (bLogTouch)
 				{
-					Gamepad->EnableTouch(true);
+					if (auto* Touch = Gamepad->GetIGamepadTouch())
+					{
+						Touch->EnableTouch(true);
+					}
 				}
 
 				if (bLogSensors)
 				{
-					Gamepad->EnableMotionSensor(true);
+					if (auto* Sensors = Gamepad->GetIGamepadSensors())
+					{
+						Sensors->EnableMotionSensor(true);
+					}
 				}
 
-				Gamepad->SetLightbar({0, 255, 0}); // Green on connect
+				if (auto* Lightbar = Gamepad->GetIGamepadLightbar())
+				{
+					Lightbar->SetLightbar({0, 255, 0}); // Green on connect
+				}
 				Gamepad->UpdateOutput();
 			}
 
 			Gamepad->UpdateInput(DeltaTime);
 			FDeviceContext* Context = Gamepad->GetMutableDeviceContext();
+			if (!Context)
+			{
+				continue;
+			}
 			FInputContext* Input = Context->GetInputState();
 
 			if (Input)
@@ -165,18 +178,30 @@ int main(int argc, char* argv[])
 				// Keep some original logic for visual feedback on controller
 				if (Input->bCross)
 				{
-					Gamepad->SetLightbar({255, 0, 0});
+					if (auto* Lightbar = Gamepad->GetIGamepadLightbar())
+					{
+						Lightbar->SetLightbar({255, 0, 0});
+					}
 					Gamepad->UpdateOutput();
 				}
 				else if (Input->bCircle)
 				{
-					Gamepad->SetLightbar({0, 0, 255});
+					if (auto* Lightbar = Gamepad->GetIGamepadLightbar())
+					{
+						Lightbar->SetLightbar({0, 0, 255});
+					}
 					Gamepad->UpdateOutput();
 				}
 				else if (Input->bTriangle)
 				{
-					Gamepad->SetVibration(0, 0);
-					Gamepad->SetLightbar({0, 0, 0});
+					if (auto* Rumbles = Gamepad->GetIGamepadRumbles())
+					{
+						Rumbles->SetVibration(0, 0);
+					}
+					if (auto* Lightbar = Gamepad->GetIGamepadLightbar())
+					{
+						Lightbar->SetLightbar({0, 0, 0});
+					}
 					Gamepad->UpdateOutput();
 				}
 			}
