@@ -135,15 +135,11 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 			return;
 		}
 
-		// const float* samples = static_cast<const float*>(pInput);
-		// std::cout << "Sample L: " << samples[0] << " | Sample R: " << samples[1] << std::endl;
-
 		static int fk = 0;
 		static std::vector<std::vector<float>> dualChannel = {};
 		if (fk % 2 == 0 && dualChannel.size() == 2)
 		{
 			// miniaudio already provides the captured audio in pInput
-			std::cout << "System audio captured" << std::endl;
 			pData->btAccumulator.push(dualChannel);
 			dualChannel.clear();
 		}
@@ -206,7 +202,6 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 			std::vector<std::vector<BTPacket>> packs;
 			packs.reserve(item.size());
 
-			std::cout << "item size: " << item.size() << std::endl;
 			for (int bt = 0; bt < item.size(); bt++)
 			{
 				std::vector<float> processed;
@@ -218,7 +213,9 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 					pData->LowPassStateRight = kOneMinusAlpha * inRight + kLowPassAlpha * pData->LowPassStateRight;
 
 					if (std::isnan(inLeft) || std::isnan(inRight))
+					{
 						continue;
+					}
 
 					float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
 					float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
@@ -226,7 +223,6 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 					processed.push_back(outRight);
 				}
 
-				std::cout << "Opus encoding: " <<  std::endl;
 				std::vector<uint8_t>  opData = std::vector<uint8_t>(200);
 				int encodedBytes = opus_encode_float(encoder, processed.data(), processed.size() / 2, opData.data(), 200);
 				if (encodedBytes <= 0)
@@ -235,22 +231,30 @@ void audio_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, 
 					continue;
 				}
 
-				std::vector<uint8_t> hapticsData(60);
+				constexpr int ratio = 48000 / 3000;
+				std::vector<uint8_t> hapticsData(64, 0);
+				for (int outFrame = 0; outFrame < 32; ++outFrame) {
+					const int inIdx = outFrame * ratio;
+
+					if (inIdx * 2 + 1 >= processed.size()) break;
+
+					const float leftSample = processed[inIdx * 2];
+					const float rightSample = processed[inIdx * 2 + 1];
+
+					const float outLeft = std::clamp((leftSample * 127.0f), -128.0f, 127.0f);
+					const float outRight = std::clamp((rightSample * 127.0f), -128.0f, 127.0f);
+					hapticsData[(outFrame * 2)]     = static_cast<uint8_t>(outLeft);
+					hapticsData[(outFrame * 2) + 1] = static_cast<uint8_t>(outRight);
+				}
 
 				BTPacket packet;
 				packet.opus = processed;
 				packet.signal = opData;
 				packet.haptics = hapticsData;
 				packs.push_back({packet});
-				std::cout << "btAccumulator popped" << std::endl;
-				//pData->btPacketQueue.push(packet);
-				std::cout << "Packet queued" << std::endl;
 			}
-			// std::cout << "Pack size: " << packs.size() << std::endl;
 			pData->btPacketQueue.push(packs[0][0]);
 			pData->btPacketQueue.push(packs[1][0]);
-			// pData->btPacketQueue.push(packs[2][0]);
-			// pData->btPacketQueue.push(packs[3][0]);
 		}
 	}
 }
@@ -1028,7 +1032,7 @@ int main(int argc, char* argv[])
 //
 	while (true)
 	{
-		//gc_sync::sleep_for(std::chrono::milliseconds(16));
+		gc_sync::sleep_for(std::chrono::milliseconds(10));
 		// Clean up finished or disconnected workers
 		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
 		{

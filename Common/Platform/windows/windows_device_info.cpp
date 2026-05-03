@@ -400,7 +400,6 @@ void windows_device_info::process_audio_haptic(FDeviceContext* Context)
 		return;
 	}
 
-	std::cout << "WriteFile : " << std::endl;
 	unsigned long BytesWritten = 0;
 	size_t BufferSize = 0;
 	if (Context->BufferHapitcs[0] == 0x32)
@@ -419,7 +418,6 @@ void windows_device_info::process_audio_haptic(FDeviceContext* Context)
 		{
 		}
 	}
-	std::cout << "WriteFile Success: " << std::endl;
 }
 
 void windows_device_info::configure_features(FDeviceContext* Context)
@@ -461,54 +459,6 @@ void windows_device_info::configure_features(FDeviceContext* Context)
 	}
 	else
 	{
-		unsigned char Feature0x09[20] = {0};
-		std::memset(Feature0x09, 0, sizeof(Feature0x09));
-
-		Feature0x09[0] = 0x09;
-		if (!HidD_GetFeature(Context->Handle, Feature0x09, 20))
-		{
-			return;
-		}
-
-		unsigned char Feature0x20[64] = {0};
-		std::memset(Feature0x20, 0, sizeof(Feature0x20));
-
-		Feature0x20[0] = 0x20;
-		if (!HidD_GetFeature(Context->Handle, Feature0x20, 64))
-		{
-			return;
-		}
-
-		unsigned char Feature0x22[64] = {0};
-		std::memset(Feature0x22, 0, sizeof(Feature0x22));
-
-		Feature0x22[0] = 0x22;
-		if (!HidD_GetFeature(Context->Handle, Feature0x22, 64))
-		{
-			return;
-		}
-
-		//
-		//
-		for (int i = 0; i < 20; i++)
-		{
-			std::cout << "Feature0x09" << std::endl;
-			std::cout << Feature0x09[i] << std::endl;
-		}
-
-		for (int i = 0; i < 64; i++)
-		{
-			std::cout << "Feature0x20" << std::endl;
-			std::cout << Feature0x20[i] << std::endl;
-		}
-
-		for (int i = 0; i < 64; i++)
-		{
-			std::cout << "Feature0x22" << std::endl;
-			std::cout << "Feat " << Feature0x22[i] << std::endl;
-		}
-		//
-
 		unsigned char FeatureBuffer[41] = {0};
 		std::memset(FeatureBuffer, 0, sizeof(FeatureBuffer));
 
