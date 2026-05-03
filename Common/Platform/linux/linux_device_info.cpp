@@ -65,19 +65,8 @@ void linux_device_info::process_audio_haptic(FDeviceContext* Context)
 
 	if (Context->ConnectionType == EDSDeviceConnection::Bluetooth)
 	{
-		// DualSense Bluetooth Audio Haptic report ID is 0x31
-		// On some Linux versions, we must ensure the report is sent with the correct ID.
-		// BufferAudio already has 0x31 at index 0.
 		
-		constexpr size_t ReportSize = 78; // Try 78 for standard haptics or 147 for advanced
-		// DualSense Bluetooth haptics often use 78-byte reports (0x31)
-		
-		int BytesWritten = SDL_hid_write(DeviceHandle, Context->BufferAudio, 147);
-		if (BytesWritten < 0)
-		{
-			// Try with 78 if 147 fails
-			SDL_hid_write(DeviceHandle, Context->BufferAudio, 78);
-		}
+		int BytesWritten = SDL_hid_write(DeviceHandle, Context->BufferHapitcs, 398);
 	}
 }
 
@@ -213,7 +202,7 @@ void linux_device_info::invalidate_handle(FDeviceContext* Context)
 		Context->Path.clear();
 		std::memset(Context->Buffer, 0, sizeof(Context->Buffer));
 		std::memset(Context->BufferDS4, 0, sizeof(Context->BufferDS4));
-		std::memset(Context->BufferAudio, 0, sizeof(Context->BufferAudio));
+		std::memset(Context->BufferHapitcs, 0, sizeof(Context->BufferHapitcs));
 
 		unsigned char* RawOutput = Context->GetRawOutputBuffer();
 		std::memset(RawOutput, 0, 78);
