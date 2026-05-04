@@ -7,11 +7,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
-#include <iomanip>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <mutex>
 #include "GCore/Utils/SoDefines.h"
@@ -27,10 +24,8 @@ namespace fs = std::filesystem;
 #include "GCore/Interfaces/Segregations/IGamepadBase.h"
 #include "GCore/Interfaces/IPlatformHardware.h"
 #include "GCore/Interfaces/Segregations/IGamepadHaptics.h"
-#include "GCore/Templates/TAudioDeviceRegistry.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
-#include "GImplementations/Utils/GamepadAudio.h"
 #include "test_utils.h"
 
 // ============================================================================
