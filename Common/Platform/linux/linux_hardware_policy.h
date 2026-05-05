@@ -16,7 +16,6 @@ namespace linux_platform
 	struct linux_hardware_policy;
 	using linux_hardware = GamepadCore::TGenericHardwareInfo<linux_hardware_policy>;
 
-
 	struct linux_hardware_policy
 	{
 		linux_hardware_policy() = default;
@@ -49,26 +48,6 @@ namespace linux_platform
 		static void ProcessAudioHaptic(FDeviceContext* Context)
 		{
 			linux_device_info::process_audio_haptic(Context);
-		}
-
-		static void ProcessAudioHaptic(FDeviceContext* Context, const std::vector<std::int16_t>& AudioData)
-		{
-			if (!Context) return;
-			IAudioDevice::Get().ProcessAudioHaptic(Context, AudioData);
-		}
-
-		void InitializeAudioDevice(FDeviceContext* Context)
-		{
-			IAudioDevice::Get().InitializeAudioContainer(Context);
-		}
-
-		class IGamepadBase* GetLibrary(uint32_t EngineDeviceId)
-		{
-			return nullptr;
-		}
-
-		void SetRegistry(class IDeviceRegistry* InRegistry)
-		{
 		}
 	};
 } // namespace linux_platform

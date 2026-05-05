@@ -209,25 +209,6 @@ void linux_device_info::invalidate_handle(FDeviceContext* Context)
 	}
 }
 
-std::string linux_device_info::get_container_id(const std::string& DevicePath)
-{
-	// No Linux, dispositivos HID no sysfs geralmente têm um link para um dispositivo "pai" que representa o hardware físico.
-	// Uma forma comum é subir na árvore do sysfs até encontrar um nó que tenha o Container ID ou usar o ID do barramento físico.
-	// Por simplicidade e compatibilidade com o que é esperado (um ID único por controle),
-	// podemos tentar extrair o endereço Bluetooth ou o caminho físico do USB se o Container ID não estiver explícito.
-
-	// No entanto, para seguir o padrão do Windows que retorna um GUID, 
-	// e considerando que o objetivo é pareamento HID + Áudio:
-	
-	// Implementação simplificada: retornar uma string vazia por enquanto ou tentar algo básico.
-	return "";
-}
-
-std::string linux_device_info::get_audio_container_id(const std::string& AudioDeviceId)
-{
-	return "";
-}
-
 EPollResult linux_device_info::poll_tick(FPlatformDeviceHandle Handle, unsigned char* Buffer, std::int32_t Length, std::int32_t& OutBytesRead)
 {
 	if (Handle == INVALID_PLATFORM_HANDLE)
@@ -252,5 +233,4 @@ EPollResult linux_device_info::poll_tick(FPlatformDeviceHandle Handle, unsigned 
 	OutBytesRead = Result;
 	return EPollResult::ReadOk;
 }
-#endif
 #endif

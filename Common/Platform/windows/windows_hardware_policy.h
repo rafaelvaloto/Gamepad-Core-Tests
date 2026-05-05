@@ -1,25 +1,13 @@
-// Copyright (c) 2025 Rafael Valoto. All Rights Reserved.
+// Copyright (c) 2025 Rafael Valoto/Publisher. All rights reserved.
+// Created for: GamepadCore - Plugin to support DualSense controller on Windows.
+// Planned Release Year: 2025
+
 #pragma once
 #ifdef BUILD_GAMEPAD_CORE_TESTS
 #include "GCore/Templates/TGenericHardwareInfo.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
-#include "GCore/Utils/SoDefines.h"
-#if GAMEPAD_CORE_HAS_AUDIO
-#include "miniaudio.h"
-#endif
 #include "windows_device_info.h"
-#include <algorithm>
-#include <cstring>
-#include <cwchar>
-#include <initguid.h>
-#include <mmdeviceapi.h>
-#include <mutex>
-#include <propsys.h>
-#include <set>
-#include <string>
 #include <vector>
-
-#include "GCore/Interfaces/IAudioDevice.h"
 using namespace GamepadCore;
 
 namespace windows_platform
@@ -60,27 +48,6 @@ namespace windows_platform
 		{
 			windows_device_info::process_audio_haptic(Context);
 		}
-
-		void ProcessAudioHaptic(FDeviceContext* Context, const std::vector<std::int16_t>& AudioData)
-		{
-			if (!Context) return;
-			IAudioDevice::Get().ProcessAudioHaptic(Context, AudioData);
-		}
-
-		void InitializeAudioDevice(FDeviceContext* Context)
-		{
-			IAudioDevice::Get().InitializeAudioContainer(Context);
-		}
-
-		class IGamepadBase* GetLibrary(uint32_t EngineDeviceId)
-		{
-			return nullptr; // Should be handled by Registry
-		}
-
-		void SetRegistry(class IDeviceRegistry* InRegistry)
-		{
-		}
-
 	};
 
 } // namespace windows_platform

@@ -1,55 +1,27 @@
-// Copyright (c) 2025 Rafael Valoto. All rights reserved.
-#define _FUNCTIONDISCOVERYKEYS_DEV_PKEY_H_
+// Copyright (c) 2025 Rafael Valoto/Publisher. All rights reserved.
+// Created for: GamepadCore - Plugin to support DualSense controller on Windows.
+// Planned Release Year: 2025
+#pragma once
+
 #include "windows_device_info.h"
-#include "GCore/Interfaces/IAudioDevice.h"
 #include <initguid.h>
 #include <iostream>
 #include <setupapi.h>
 #include <windows.h>
-
-#ifdef BUILD_GAMEPAD_CORE_TESTS
 
 extern "C"
 {
 #include <hidsdi.h>
 }
 
+#include "GCore/Utils/SoDefines.h"
 #include "GCore/Types/DSCoreTypes.h"
 #include "GCore/Types/Structs/Config/GamepadCalibration.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
 #include "GImplementations/Utils/GamepadSensors.h"
 #include <filesystem>
-#include <mmdeviceapi.h>
-#include <propsys.h>
-#include <unordered_map>
 #include <vector>
 
-#ifdef DEFINE_PROPERTYKEY
-#undef DEFINE_PROPERTYKEY
-#endif
-#define DEFINE_PROPERTYKEY(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8, pid) \
-	extern "C" const __declspec(selectany) PROPERTYKEY name = {{l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}, pid}
-
-#ifdef DEFINE_DEVPROPKEY
-#undef DEFINE_DEVPROPKEY
-#endif
-#define DEFINE_DEVPROPKEY(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8, pid) \
-	extern "C" const __declspec(selectany) DEVPROPKEY name = {{l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}, pid}
-
-#include <initguid.h>
-
-#ifdef PKEY_Device_ContainerId
-#undef PKEY_Device_ContainerId
-#endif
-DEFINE_PROPERTYKEY(PKEY_Device_ContainerId, 0x8c7ed206, 0x3f8a, 0x4827, 0xb3, 0xab, 0xae, 0x9e, 0x1f, 0xae, 0xfc, 0x6c, 2);
-
-#ifndef DEVPKEY_Device_ContainerId
-DEFINE_DEVPROPKEY(DEVPKEY_Device_ContainerId, 0x8c7ed206, 0x3f8a, 0x4827, 0xb3, 0xab, 0xae, 0x9e, 0x1f, 0xae, 0xfc, 0x6c, 2);
-#endif
-
-#ifndef PKEY_NAME
-DEFINE_PROPERTYKEY(PKEY_NAME, 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac, 10);
-#endif
 
 #pragma comment(lib, "Propsys.lib")
 
@@ -260,14 +232,6 @@ void windows_device_info::invalidate_handle(FDeviceContext* Context)
 	}
 }
 
-void windows_device_info::invalidate_handle(HANDLE Handle)
-{
-	if (Handle != INVALID_PLATFORM_HANDLE)
-	{
-		CloseHandle(Handle);
-	}
-}
-
 EPollResult windows_device_info::poll_tick(HANDLE Handle, unsigned char* Buffer, std::int32_t Length, DWORD& OutBytesRead)
 {
 	std::int32_t Err = ERROR_SUCCESS;
@@ -298,89 +262,6 @@ bool windows_device_info::ping_once(HANDLE Handle, std::int32_t* OutLastError)
 		*OutLastError = ERROR_SUCCESS;
 	}
 	return true;
-}
-
-std::string windows_device_info::get_container_id(const std::string& DevicePath)
-{
-	std::wstring WPath(DevicePath.begin(), DevicePath.end());
-	GUID HidGuid;
-	HidD_GetHidGuid(&HidGuid);
-
-	HDEVINFO DeviceInfoSet = SetupDiGetClassDevsW(&HidGuid, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-	if (DeviceInfoSet == INVALID_HANDLE_VALUE)
-	{
-		return "";
-	}
-
-	SP_DEVICE_INTERFACE_DATA DeviceInterfaceData = {sizeof(SP_DEVICE_INTERFACE_DATA)};
-	if (SetupDiOpenDeviceInterfaceW(DeviceInfoSet, WPath.c_str(), 0, &DeviceInterfaceData))
-	{
-		SP_DEVINFO_DATA DeviceInfoData = {sizeof(SP_DEVINFO_DATA)};
-		// DetailData is needed to get the DevInfoData associated with the interface
-		DWORD RequiredSize = 0;
-		SetupDiGetDeviceInterfaceDetailW(DeviceInfoSet, &DeviceInterfaceData, nullptr, 0, &RequiredSize, nullptr);
-		if (GetLastError() == ERROR_INSUFFICIENT_BUFFER)
-		{
-			std::vector<char> Buffer(RequiredSize);
-			PSP_DEVICE_INTERFACE_DETAIL_DATA_W pDetail = (PSP_DEVICE_INTERFACE_DETAIL_DATA_W)Buffer.data();
-			pDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
-			if (SetupDiGetDeviceInterfaceDetailW(DeviceInfoSet, &DeviceInterfaceData, pDetail, RequiredSize, nullptr, &DeviceInfoData))
-			{
-				DEVPROPTYPE PropType;
-				GUID ContainerId = {0};
-				if (SetupDiGetDevicePropertyW(DeviceInfoSet, &DeviceInfoData, &DEVPKEY_Device_ContainerId, &PropType, (PBYTE)&ContainerId, sizeof(GUID), nullptr, 0))
-				{
-					wchar_t GuidString[40];
-					StringFromGUID2(ContainerId, GuidString, 40);
-					SetupDiDestroyDeviceInfoList(DeviceInfoSet);
-
-					char GuidStr[40];
-					WideCharToMultiByte(CP_ACP, 0, GuidString, -1, GuidStr, 40, nullptr, nullptr);
-					return std::string(GuidStr);
-				}
-			}
-		}
-	}
-	SetupDiDestroyDeviceInfoList(DeviceInfoSet);
-	return "";
-}
-
-std::string windows_device_info::get_audio_container_id(const wchar_t* AudioDeviceId)
-{
-	IMMDeviceEnumerator* pEnumerator = nullptr;
-	IMMDevice* pDevice = nullptr;
-	IPropertyStore* pProps = nullptr;
-	std::string Result = "";
-
-	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
-	if (SUCCEEDED(hr))
-	{
-		hr = pEnumerator->GetDevice(AudioDeviceId, &pDevice);
-		if (SUCCEEDED(hr))
-		{
-			hr = pDevice->OpenPropertyStore(STGM_READ, &pProps);
-			if (SUCCEEDED(hr))
-			{
-				PROPVARIANT var;
-				PropVariantInit(&var);
-				hr = pProps->GetValue(PKEY_Device_ContainerId, &var);
-				if (SUCCEEDED(hr) && var.vt == VT_CLSID)
-				{
-					wchar_t GuidString[40];
-					StringFromGUID2(*var.puuid, GuidString, 40);
-
-					char GuidStr[40];
-					WideCharToMultiByte(CP_ACP, 0, GuidString, -1, GuidStr, 40, nullptr, nullptr);
-					Result = std::string(GuidStr);
-				}
-				PropVariantClear(&var);
-				pProps->Release();
-			}
-			pDevice->Release();
-		}
-		pEnumerator->Release();
-	}
-	return Result;
 }
 
 void windows_device_info::process_audio_haptic(FDeviceContext* Context)
@@ -472,5 +353,3 @@ void windows_device_info::configure_features(FDeviceContext* Context)
 		Context->Calibration = Calibration;
 	}
 }
-
-#endif
