@@ -234,3 +234,4 @@ EPollResult linux_device_info::poll_tick(FPlatformDeviceHandle Handle, unsigned 
 	return EPollResult::ReadOk;
 }
 #endif
+#endif
