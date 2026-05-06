@@ -3,7 +3,6 @@
 // Description: Integration test for Audio Haptics using a .wav file as input.
 // Reference: Based on AudioHapticsListener implementation for USB/BT audio processing.
 
-#ifdef BUILD_GAMEPAD_CORE_TESTS
 #include "GCore/Templates/TAudioDeviceRegistry.h"
 #include "GCore/Utils/SoDefines.h"
 #include "Platform/windows/wasapi_policy.h"
@@ -20,17 +19,12 @@
 #include <vector>
 namespace fs = std::filesystem;
 
-// miniaudio for audio playback and WAV decoding
-#if GAMEPAD_CORE_HAS_AUDIO
-#include "miniaudio.h"
-#endif
-
 #include "GCore/Interfaces/IPlatformHardware.h"
 #include "GCore/Interfaces/Segregations/IGamepadBase.h"
 #include "GCore/Templates/TBasicDeviceRegistry.h"
 #include "GCore/Types/Structs/Context/DeviceContext.h"
-#include "opus.h"
 #include "test_utils.h"
+
 
 struct test_device_registry_policy : public test_utils::test_registry_policy
 {
@@ -131,15 +125,15 @@ int main(int argc, char* argv[])
 	}
 
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_EXPERT_FRAME_DURATION(OPUS_FRAMESIZE_10_MS));
-	opus_encoder_ctl(test_utils::encoder, OPUS_SET_BITRATE(OPUS_BITRATE_MAX)); //
+	opus_encoder_ctl(test_utils::encoder, OPUS_SET_BITRATE(160000)); //
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_VBR(0));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_COMPLEXITY(0));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_PREDICTION_DISABLED(1));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_PACKET_LOSS_PERC(0));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
 
-	std::string WavFilePath;
 	bool bUseSystemAudio = false;
+	std::vector<std::string> WavFiles;
 
 	if (argc < 2)
 	{
@@ -149,46 +143,14 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-		WavFilePath = argv[1];
+
+		for (int i = 1; i < argc; ++i)
+		{
+			WavFiles.push_back(argv[i]);
+		}
 	}
 
 	std::cout << "[System] Audio Haptics Integration Test" << std::endl;
-
-	ma_decoder decoder;
-	ma_uint64 totalFrames = 0;
-	if (!bUseSystemAudio)
-	{
-		if (fs::path path(WavFilePath); !fs::exists(path))
-		{
-			if (fs::path alternativePath = fs::path(GAMEPAD_CORE_PROJECT_ROOT) / WavFilePath; fs::exists(alternativePath))
-			{
-				WavFilePath = alternativePath.string();
-				std::cout << "[System] Resolved path to: " << WavFilePath << std::endl;
-			}
-		}
-
-		std::cout << "[System] Loading WAV file: " << WavFilePath << std::endl;
-
-		// Initialize decoder (output as float, stereo, 48kHz)
-		ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
-		if (ma_decoder_init_file(WavFilePath.c_str(), &decoderConfig, &decoder) != MA_SUCCESS)
-		{
-			std::cerr << "[Error] Failed to load WAV file: " << WavFilePath << std::endl;
-			return 1;
-		}
-
-		ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
-		std::cout << "[WavReader] Loaded WAV file successfully:" << std::endl;
-		std::cout << "  - Sample Rate: " << decoder.outputSampleRate << " Hz" << std::endl;
-		std::cout << "  - Channels: " << decoder.outputChannels << std::endl;
-		std::cout << "  - Total Frames: " << totalFrames << std::endl;
-		std::cout << "  - Duration: " << (static_cast<float>(totalFrames) / decoder.outputSampleRate) << " seconds" << std::endl;
-		ma_decoder_uninit(&decoder);
-	}
-	else
-	{
-		std::cout << "[System] Mode: System Audio Capture (Press Ctrl+C to stop)" << std::endl;
-	}
 
 	// Initialize Hardware Layer
 	std::cout << "[System] Initializing Hardware Layer..." << std::endl;
@@ -204,13 +166,14 @@ int main(int argc, char* argv[])
 
 	std::cout << "[System] Waiting for controller connection via USB/BT..." << std::endl;
 	std::unordered_map<uint32_t, std::unique_ptr<test_utils::gamepad_audio_worker>> ActiveWorkers;
+	std::unordered_map<uint32_t, std::string> WorkerDevicePaths;
 
 	Registry->Policy.NewGamepads.clear();
 	Registry->PlugAndPlay(2.0f);
 	while (true)
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(16));
-		Registry->PlugAndPlay(0.0166f); // when sum 0.0166 == 2 seconds
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		Registry->PlugAndPlay(0.001f); // when sum 0.0166 == 2 seconds
 
 		// Check for new gamepads from policy
 		{
@@ -250,14 +213,33 @@ int main(int argc, char* argv[])
 
 					if (!ActiveWorkers.contains(GamepadId))
 					{
-						auto Worker = std::make_unique<test_utils::gamepad_audio_worker>(Gamepad, WavFilePath, bUseSystemAudio);
+						std::string SelectedWav;
+						if (!bUseSystemAudio)
+						{
+							if (GamepadId < WavFiles.size())
+							{
+								SelectedWav = WavFiles[GamepadId];
+							}
+							else
+							{
+								SelectedWav = WavFiles.back();
+								std::cout << "[Warning] No specific WAV for GamepadId " << GamepadId << ". Using last: " << SelectedWav << std::endl;
+							}
+						}
+
+						auto Worker = std::make_unique<test_utils::gamepad_audio_worker>(Gamepad, SelectedWav, bUseSystemAudio);
 						ActiveWorkers[GamepadId] = std::move(Worker);
 						ActiveWorkers[GamepadId]->start();
+						if (ctx)
+						{
+							WorkerDevicePaths[GamepadId] = ctx->Path;
+						}
 
 						std::cout << "[System] Creating worker for GamepadId: " << GamepadId << std::endl;
 					}
 				}
 			}
+			Registry->Policy.NewGamepads.clear();
 		}
 
 		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
@@ -271,6 +253,12 @@ int main(int argc, char* argv[])
 
 			if (it->second->is_finished() || !bIsConnected)
 			{
+				it->second->stop();
+				if (const auto pathIt = WorkerDevicePaths.find(it->first); pathIt != WorkerDevicePaths.end())
+				{
+					test_audio_device_registry::Get()->UnregisterAudioDevice(pathIt->second);
+					WorkerDevicePaths.erase(pathIt);
+				}
 				std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
 				it = ActiveWorkers.erase(it);
 			}
@@ -286,4 +274,3 @@ int main(int argc, char* argv[])
 
 	return 0;
 }
-#endif

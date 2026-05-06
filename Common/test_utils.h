@@ -1,5 +1,7 @@
 // Copyright (c) 2025 Rafael Valoto. All Rights Reserved.
 #pragma once
+
+
 #ifdef BUILD_GAMEPAD_CORE_TESTS
 
 #include "GCore/Interfaces/IPlatformHardware.h"
@@ -7,28 +9,53 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <utility>
+
+#ifndef GAMEPAD_CORE_HAS_AUDIO
+#define GAMEPAD_CORE_HAS_AUDIO 0
+#endif
+
+#if GAMEPAD_CORE_HAS_AUDIO
+#include "opus.h"
+#endif
 
 #if _WIN32
 #include "Platform/windows/windows_hardware_policy.h"
 using platform_hardware = windows_platform::windows_hardware;
+#if GAMEPAD_CORE_HAS_AUDIO
+#include "Platform/windows/wasapi_policy.h"
 using audio_platform_policy = wasapi_policy;
+#endif
 #elif __linux__
 #include "Platform/linux/linux_hardware_policy.h"
 using platform_hardware = linux_platform::linux_hardware;
-using audio_platform_policy = nullptr_t;
 #endif
 
 namespace test_utils
 {
+
+#if GAMEPAD_CORE_HAS_AUDIO
+	static OpusEncoder* encoder;
+#endif
+
 	// Thread-safe queue for audio packets
 	template<typename T>
 	class thread_safe_queue
 	{
 	public:
-		void push(const T& item)
+		void push(T item)
 		{
 			gc_lock::lock_guard<gc_lock::mutex> lock(mMutex);
-			mQueue.push(item);
+			mQueue.push(std::move(item));
 		}
 
 		bool pop(T& item)
@@ -47,6 +74,13 @@ namespace test_utils
 		{
 			gc_lock::lock_guard<gc_lock::mutex> lock(mMutex);
 			return mQueue.empty();
+		}
+
+		void clear()
+		{
+			gc_lock::lock_guard<gc_lock::mutex> lock(mMutex);
+			std::queue<T> emptyQueue;
+			mQueue.swap(emptyQueue);
 		}
 
 	private:
@@ -147,8 +181,6 @@ namespace test_utils
 
 	constexpr float kLowPassAlphaBt = 1.0f;
 	constexpr float kOneMinusAlphaBt = 1.0f - kLowPassAlphaBt;
-
-	static OpusEncoder* encoder;
 	struct BTPacket
 	{
 		std::vector<float> opus;      // float pcm
@@ -190,7 +222,6 @@ namespace test_utils
 
 		std::vector<float> tempBuffer(frameCount * 2);
 		ma_uint64 framesRead = 0;
-
 		if (pData->bIsSystemAudio)
 		{
 			if (pInput == nullptr)
@@ -213,7 +244,7 @@ namespace test_utils
 			}
 			else
 			{
-				const float* pInputFloat = static_cast<const float*>(pInput);
+				const auto* pInputFloat = static_cast<const float*>(pInput);
 				std::memcpy(tempBuffer.data(), pInputFloat, frameCount * 2 * sizeof(float));
 				framesRead = frameCount;
 
@@ -268,28 +299,27 @@ namespace test_utils
 				pData->LowPassStateLeft = kOneMinusAlpha * inLeft + kLowPassAlpha * pData->LowPassStateLeft;
 				pData->LowPassStateRight = kOneMinusAlpha * inRight + kLowPassAlpha * pData->LowPassStateRight;
 
-				float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
-				float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
+				const float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
+				const float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
 
-				std::vector<int16_t> stereoSample = {
+				const std::vector<int16_t> stereoSample = {
 				    static_cast<int16_t>(outLeft * 32767.0f),
 				    static_cast<int16_t>(outRight * 32767.0f)};
 				pData->usbSampleQueue.push(stereoSample);
 			}
 		}
 
-		pData->framesPlayed += frameCount;
+
 
 		// Process for haptics
 		if (pData->bIsWireless)
 		{
+			std::vector<std::vector<BTPacket>> packs;
+
 			// samplesSend samples;
 			std::vector<std::vector<float>> item;
 			while (pData->btAccumulator.pop(item))
 			{
-				std::vector<std::vector<BTPacket>> packs;
-				packs.reserve(item.size());
-
 				for (int bt = 0; bt < item.size(); bt++)
 				{
 					std::vector<float> processed;
@@ -343,19 +373,21 @@ namespace test_utils
 					packet.opus = processed;
 					packet.signal = opData;
 					packet.haptics = hapticsData;
-					packs.push_back({packet});
 					pData->btPacketQueue.push(packet);
 				}
-
-				//pData->btPacketQueue.push(packs[1][0]);
-				break;
 			}
 		}
+		pData->framesPlayed += frameCount;
 	}
 
 	// Consume haptics queue and send to controller
 	inline void consume_haptics_queue(IGamepadHaptics* AudioHaptics, audio_callback_data& callbackData)
 	{
+		if (!AudioHaptics || callbackData.bFinished)
+		{
+			return;
+		}
+
 		if (callbackData.bIsWireless)
 		{
 			test_utils::BTPacket chunk;
@@ -406,9 +438,6 @@ namespace test_utils
 		void start()
 		{
 			WorkerThread = std::thread(&gamepad_audio_worker::run, this);
-			Gamepad->GetIGamepadSettings()->DualSenseSettings(0, 1, 1, 0, 128, 0xfc, 0, 0);
-			Gamepad->GetIGamepadLightbar()->SetLightbar({255, 255, 255});
-			Gamepad->UpdateOutput();
 		}
 
 		void stop()
@@ -421,12 +450,14 @@ namespace test_utils
 		}
 
 		bool is_finished() const { return bFinished.load(); }
+		const std::string& get_device_path() const { return DevicePath; }
 
 	private:
 		void run()
 		{
 			if (!Gamepad)
 			{
+				bFinished.store(true);
 				return;
 			}
 
@@ -442,6 +473,10 @@ namespace test_utils
 
 			// Initialize AudioContext for USB haptics
 			FDeviceContext* Context = Gamepad->GetMutableDeviceContext();
+			if (Context)
+			{
+				DevicePath = Context->Path;
+			}
 			if (!bIsWireless && Context)
 			{
 				IAudioDevice::Get().InitializeAudioContainer(Context);
@@ -453,13 +488,15 @@ namespace test_utils
 
 			if (!bUseSystemAudio)
 			{
-				if (fs::path path(WavFilePath); !path.is_absolute() && !fs::exists(path))
+				if (std::filesystem::path path(WavFilePath); !path.is_absolute() && !std::filesystem::exists(path))
 				{
-					if (fs::path alternativePath = fs::path(GAMEPAD_CORE_PROJECT_ROOT) / WavFilePath; fs::exists(alternativePath))
+					#ifdef GAMEPAD_CORE_PROJECT_ROOT
+					if (std::filesystem::path alternativePath = std::filesystem::path(GAMEPAD_CORE_PROJECT_ROOT) / WavFilePath; std::filesystem::exists(alternativePath))
 					{
 						WavFilePath = alternativePath.string();
 						std::cout << "[Worker] Resolved path to: " << WavFilePath << std::endl;
 					}
+					#endif
 				}
 
 				ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 48000);
@@ -479,7 +516,6 @@ namespace test_utils
 			audio_callback_data callbackData;
 			callbackData.bIsWireless = bIsWireless;
 			callbackData.bIsSystemAudio = bUseSystemAudio;
-
 			callbackData.pDecoder = bDecoderInitialized ? &decoder : nullptr;
 
 			// Initialize playback device
@@ -501,7 +537,7 @@ namespace test_utils
 			deviceConfig.sampleRate = 48000;
 			deviceConfig.pUserData = &callbackData;
 			deviceConfig.dataCallback = audio_data_callback;
-			deviceConfig.periodSizeInMilliseconds = 10;
+			deviceConfig.periodSizeInMilliseconds = 10; // 20ms buffer for lower latency
 
 			ma_device device;
 			if (ma_device_init(nullptr, &deviceConfig, &device) != MA_SUCCESS)
@@ -526,13 +562,22 @@ namespace test_utils
 			}
 
 			// Main loop for this controller
-			while (!callbackData.bFinished && !bFinished.load() && Gamepad->IsConnected())
+			while (!callbackData.bFinished && !bFinished.load())
 			{
+				if (!Gamepad->IsConnected())
+				{
+					break;
+				}
 				consume_haptics_queue(AudioHaptics, callbackData);
 			}
 
+			callbackData.bFinished = true;
+
 			// Cleanup
 			ma_device_uninit(&device);
+			callbackData.btPacketQueue.clear();
+			callbackData.btAccumulator.clear();
+			callbackData.usbSampleQueue.clear();
 			if (bDecoderInitialized)
 			{
 				ma_decoder_uninit(&decoder);
@@ -556,6 +601,7 @@ namespace test_utils
 
 		IGamepadBase* Gamepad;
 		std::string WavFilePath;
+		std::string DevicePath;
 		std::thread WorkerThread;
 	};
 #endif

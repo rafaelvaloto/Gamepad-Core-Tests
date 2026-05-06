@@ -2,7 +2,14 @@
 // Created for: GamepadCore - Plugin to support DualSense controller on Windows.
 // Planned Release Year: 2025
 #pragma once
+
+#ifndef GAMEPAD_CORE_HAS_AUDIO
+#define GAMEPAD_CORE_HAS_AUDIO 0
+#endif
+
+#if GAMEPAD_CORE_HAS_AUDIO
 #include "miniaudio.h"
+#endif
 #include <filesystem>
 #include "windows_device_info.h"
 #include <initguid.h>
@@ -44,6 +51,8 @@ DEFINE_PROPERTYKEY(PKEY_NAME, 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60
 
 #pragma comment(lib, "Propsys.lib")
 
+#if GAMEPAD_CORE_HAS_AUDIO
+
 /**
  * @brief Audio device context using miniaudio for cross-platform audio playback.
  *
@@ -62,7 +71,7 @@ struct wasapi_policy
 	using AudioFrameCountType = ma_uint32;
 	using ContextType = FDeviceContext;
 
-	int NumChannels = 4;
+	int NumChannels = 2;
 	int SampleRate = 48000;
 	bool bInitialized = false;
 	bool bHasDeviceId = false;
@@ -410,5 +419,7 @@ struct wasapi_policy
 		return Result;
 	}
 };
+
+#endif // GAMEPAD_CORE_HAS_AUDIO
 
 
