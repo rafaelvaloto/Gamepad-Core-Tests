@@ -269,7 +269,10 @@ int main(int argc, char* argv[])
 		}
 
 		// helper automated tests
-		test_utils::automated_tests();
+		if (test_utils::automated_tests())
+		{
+			break;
+		}
 	}
 
 	return 0;

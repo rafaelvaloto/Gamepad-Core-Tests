@@ -105,24 +105,18 @@ namespace test_utils
 		std::cout << "=======================================================" << std::endl;
 	}
 
-	inline void automated_tests()
+	inline bool automated_tests()
 	{
 #ifdef AUTOMATED_TESTS
 		static auto StartTime = std::chrono::steady_clock::now();
 		auto Now = std::chrono::steady_clock::now();
 		if (std::chrono::duration_cast<std::chrono::seconds>(Now - StartTime).count() >= 30)
 		{
-			if (!ActiveWorkers.empty())
-			{
-				std::cout << "[Test] Automated timeout reached (30s). Finishing..." << std::endl;
-			}
-			else
-			{
-				std::cout << "[Test] No controller found in automated mode after 30s. Exiting." << std::endl;
-			}
-			break;
+			std::cout << "[Test] Automated timeout reached (30s). Finishing..." << std::endl;
+			return true;
 		}
 #endif
+		return false;
 	}
 
 	/**
