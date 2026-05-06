@@ -8,6 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(TEST_COMMON_SOURCES "")
 
+# Keep test_utils.h visible in IDE/source groups.
+list(APPEND TEST_COMMON_SOURCES
+        test_utils.h
+)
+
 if(WIN32)
     list(APPEND TEST_COMMON_SOURCES
             Platform/windows/windows_device_info.cpp
@@ -29,6 +34,7 @@ target_include_directories(GamepadCoreTestCommon PUBLIC
 
 target_compile_definitions(GamepadCoreTestCommon PUBLIC BUILD_GAMEPAD_CORE_TESTS)
 
+
 if(WIN32)
     target_link_libraries(GamepadCoreTestCommon PUBLIC
         Setupapi
@@ -45,3 +51,8 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 target_link_libraries(GamepadCoreTestCommon PUBLIC GamepadCore)
+
+if(TARGET opus)
+    target_link_libraries(GamepadCoreTestCommon PUBLIC opus)
+endif()
+
