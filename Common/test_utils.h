@@ -198,7 +198,7 @@ namespace test_utils
 		// Queues for haptics (like AudioHapticsListener)
 		test_utils::thread_safe_queue<BTPacket> btPacketQueue;
 		// Accumulator for Bluetooth - need 480 frames for 10ms Opus frame @ 48kHz
-		test_utils::thread_safe_queue<std::vector<std::vector<float>>> btAccumulator;
+		test_utils::thread_safe_queue<std::vector<float>> btAccumulator;
 		// Queues for usb
 		test_utils::thread_safe_queue<std::vector<int16_t>> usbSampleQueue;
 	};
@@ -225,16 +225,28 @@ namespace test_utils
 
 			if (pData->bIsWireless)
 			{
-				static int fk = 0;
 				static std::vector<std::vector<float>> dualChannel = {};
-				if (fk % 2 == 0 && dualChannel.size() == 2)
+				dualChannel.emplace_back(
+					static_cast<const float*>(pInput),
+					static_cast<const float*>(pInput) + (frameCount * 2)
+				);
+
+				// 2. Agora que o dado atual está no buffer, verifica se completou o lote de 5
+				if (dualChannel.size() == 4)
 				{
-					// miniaudio already provides the captured audio in pInput
-					pData->btAccumulator.push(dualChannel);
+					// Envia os 5 blocos na ordem correta
+					pData->btAccumulator.push(dualChannel[0]);
+					pData->btAccumulator.push(dualChannel[1]);
+					pData->btAccumulator.push(dualChannel[2]);
+					pData->btAccumulator.push(dualChannel[3]);
+					// pData->btAccumulator.push(dualChannel[4]); // O frame atual (dualChannel[4]) é processado aqui!
+					// pData->btAccumulator.push(dualChannel[5]); // O frame atual (dualChannel[4]) é processado aqui!
+					// pData->btAccumulator.push(dualChannel[6]); // O frame atual (dualChannel[4]) é processado aqui!
+					// pData->btAccumulator.push(dualChannel[7]); // O frame atual (dualChannel[4]) é processado aqui!
+
+					// Limpa mantendo a capacidade alocada para evitar novos mallocs no próximo ciclo
 					dualChannel.clear();
 				}
-
-				dualChannel.push_back(std::vector<float>(static_cast<const float*>(pInput), static_cast<const float*>(pInput) + frameCount * 2));
 			}
 			else
 			{
@@ -308,67 +320,74 @@ namespace test_utils
 		// Process for haptics
 		if (pData->bIsWireless)
 		{
-			std::vector<std::vector<BTPacket>> packs;
+
 
 			// samplesSend samples;
-			std::vector<std::vector<float>> item;
+			std::vector<float> item;
 			while (pData->btAccumulator.pop(item))
 			{
-				for (int bt = 0; bt < item.size(); bt++)
+				std::vector<float> processed;
+				for (int i = 0; i < frameCount; i++)
 				{
-					std::vector<float> processed;
-					for (int i = 0; i < frameCount; i++)
+					float inLeft = item[i * 2];
+					float inRight = item[i * 2 + 1];
+
+					pData->LowPassStateLeft = kOneMinusAlpha * inLeft + kLowPassAlpha * pData->LowPassStateLeft;
+					pData->LowPassStateRight = kOneMinusAlpha * inRight + kLowPassAlpha * pData->LowPassStateRight;
+
+					if (std::isnan(inLeft) || std::isnan(inRight))
 					{
-						float inLeft = item[bt][i * 2];
-						float inRight = item[bt][i * 2 + 1];
-
-						pData->LowPassStateLeft = kOneMinusAlpha * inLeft + kLowPassAlpha * pData->LowPassStateLeft;
-						pData->LowPassStateRight = kOneMinusAlpha * inRight + kLowPassAlpha * pData->LowPassStateRight;
-
-						if (std::isnan(inLeft) || std::isnan(inRight))
-						{
-							continue;
-						}
-
-						float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
-						float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
-						processed.push_back(outLeft);
-						processed.push_back(outRight);
-					}
-
-					auto opData = std::vector<uint8_t>(200);
-					if (const int encodedBytes = opus_encode_float(encoder, processed.data(), processed.size() / 2, opData.data(), 200); encodedBytes <= 0)
-					{
-						std::cout << "Opus encoding failed: " << encodedBytes << std::endl;
 						continue;
 					}
 
-					constexpr int ratio = 48000 / 3000;
-					std::vector<uint8_t> hapticsData(64, 0);
-					for (int outFrame = 0; outFrame < 32; ++outFrame)
+					float outLeft = std::clamp(inLeft - pData->LowPassStateLeft, -1.0f, 1.0f);
+					float outRight = std::clamp(inRight - pData->LowPassStateRight, -1.0f, 1.0f);
+					processed.push_back(outLeft);
+					processed.push_back(outRight);
+				}
+
+				auto opData = std::vector<uint8_t>(200);
+				if (const int encodedBytes = opus_encode_float(encoder, processed.data(), processed.size(), opData.data(), 200); encodedBytes <= 0)
+				{
+					std::cout << "Opus encoding failed: " << encodedBytes << std::endl;
+					continue;
+				}
+
+				constexpr int ratio = 48000 / 3000;
+				std::vector<uint8_t> hapticsData(64, 0);
+				for (int outFrame = 0; outFrame < 32; ++outFrame)
+				{
+					const int inIdx = outFrame * ratio;
+
+					if (inIdx * 2 + 1 >= processed.size())
 					{
-						const int inIdx = outFrame * ratio;
-
-						if (inIdx * 2 + 1 >= processed.size())
-						{
-							break;
-						}
-
-						const float leftSample = processed[inIdx * 2];
-						const float rightSample = processed[inIdx * 2 + 1];
-
-						const float outLeft = std::clamp((leftSample * 127.0f), -128.0f, 127.0f);
-						const float outRight = std::clamp((rightSample * 127.0f), -128.0f, 127.0f);
-						hapticsData[(outFrame * 2)] = static_cast<uint8_t>(outLeft);
-						hapticsData[(outFrame * 2) + 1] = static_cast<uint8_t>(outRight);
+						break;
 					}
 
-					BTPacket packet;
-					packet.opus = processed;
-					packet.signal = opData;
-					packet.haptics = hapticsData;
-					pData->btPacketQueue.push(packet);
+					const float leftSample = processed[inIdx * 2];
+					const float rightSample = processed[inIdx * 2 + 1];
+
+					const float outLeft = std::clamp((leftSample * 127.0f), -128.0f, 127.0f);
+					const float outRight = std::clamp((rightSample * 127.0f), -128.0f, 127.0f);
+					hapticsData[(outFrame * 2)] = static_cast<uint8_t>(outLeft);
+					hapticsData[(outFrame * 2) + 1] = static_cast<uint8_t>(outRight);
 				}
+
+				BTPacket packet;
+				packet.opus = processed;
+				packet.signal = opData;
+				packet.haptics = hapticsData;
+				//packs.push_back({packet});
+				pData->btPacketQueue.push(packet);
+				//
+				// for (int bt = 0; bt < item.size(); bt++)
+				// {
+				// 	
+				// }
+				// pData->btPacketQueue.push(packs[0][0]);
+				// pData->btPacketQueue.push(packs[1][0]);
+				// pData->btPacketQueue.push(packs[2][0]);
+				// pData->btPacketQueue.push(packs[3][0]);
 			}
 		}
 		pData->framesPlayed += frameCount;
