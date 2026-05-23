@@ -117,7 +117,7 @@ using test_device_registry = TBasicDeviceRegistry<test_device_registry_policy>;
 int main(int argc, char* argv[])
 {
 	int error = 0;
-	test_utils::encoder = opus_encoder_create(48000, 2, OPUS_APPLICATION_AUDIO, &error);
+	test_utils::encoder = opus_encoder_create(48000, 2, OPUS_APPLICATION_RESTRICTED_LOWDELAY, &error);
 	if (error)
 	{
 		std::cerr << "Failed to create Opus encoder: " << error << std::endl;
@@ -125,12 +125,11 @@ int main(int argc, char* argv[])
 	}
 
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_EXPERT_FRAME_DURATION(OPUS_FRAMESIZE_10_MS));
-	opus_encoder_ctl(test_utils::encoder, OPUS_SET_BITRATE(160000)); //
+	opus_encoder_ctl(test_utils::encoder, OPUS_SET_BITRATE(512000)); //
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_VBR(0));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_COMPLEXITY(0));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_PREDICTION_DISABLED(1));
 	opus_encoder_ctl(test_utils::encoder, OPUS_SET_PACKET_LOSS_PERC(0));
-	opus_encoder_ctl(test_utils::encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
 
 	bool bUseSystemAudio = false;
 	std::vector<std::string> WavFiles;
@@ -168,13 +167,11 @@ int main(int argc, char* argv[])
 	std::unordered_map<uint32_t, std::unique_ptr<test_utils::gamepad_audio_worker>> ActiveWorkers;
 	std::unordered_map<uint32_t, std::string> WorkerDevicePaths;
 
-	Registry->Policy.NewGamepads.clear();
+	int percent = 0;
 	Registry->PlugAndPlay(2.0f);
 	while (true)
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		Registry->PlugAndPlay(0.001f); // when sum 0.0166 == 2 seconds
-
+		std::this_thread::sleep_for(std::chrono::milliseconds(33));
 		// Check for new gamepads from policy
 		{
 			gc_lock::lock_guard<gc_lock::mutex> Lock(Registry->Policy.PolicyMutex);
@@ -185,6 +182,7 @@ int main(int argc, char* argv[])
 					auto ctx = Gamepad->GetMutableDeviceContext();
 					if (ctx && ctx->ConnectionType == EDSDeviceConnection::Usb)
 					{
+						std::cout << "[System] InitializeAudioContainer..." << std::endl;
 						test_audio_device_registry::Get()->InitializeAudioContainer(ctx);
 					}
 
@@ -242,31 +240,32 @@ int main(int argc, char* argv[])
 			Registry->Policy.NewGamepads.clear();
 		}
 
-		for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
+		if (percent++ % 500 == 0)
 		{
-			bool bIsConnected = false;
-			IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
-			if (Gamepad && Gamepad->IsConnected())
+			Registry->PlugAndPlay(2.0f); // when sum 0.0166 == 2 seconds
+			for (auto it = ActiveWorkers.begin(); it != ActiveWorkers.end();)
 			{
-				bIsConnected = true;
-			}
-
-			if (it->second->is_finished() || !bIsConnected)
-			{
-				it->second->stop();
-				if (const auto pathIt = WorkerDevicePaths.find(it->first); pathIt != WorkerDevicePaths.end())
+				std::cout << "[System] ActiveWorkers: " << it->first << std::endl;
+				IGamepadBase* Gamepad = Registry->GetLibrary(it->first);
+				if (!Gamepad)
 				{
-					test_audio_device_registry::Get()->UnregisterAudioDevice(pathIt->second);
-					WorkerDevicePaths.erase(pathIt);
+					std::cout << "[System] Stop: " << it->first << std::endl;
+					it->second->stop();
+					if (const auto pathIt = WorkerDevicePaths.find(it->first); pathIt != WorkerDevicePaths.end())
+					{
+						test_audio_device_registry::Get()->UnregisterAudioDevice(pathIt->second);
+						WorkerDevicePaths.erase(pathIt);
+					}
+					std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
+					it = ActiveWorkers.erase(it);
 				}
-				std::cout << "[System] Removing worker for GamepadId: " << it->first << std::endl;
-				it = ActiveWorkers.erase(it);
-			}
-			else
-			{
-				++it;
+				else
+				{
+					++it;
+				}
 			}
 		}
+
 
 		// helper automated tests
 		if (test_utils::automated_tests())
