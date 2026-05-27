@@ -62,3 +62,6 @@ cmake-build-*/
 # No entanto, se houver pastas de build dentro de submodules:
 **/cmake-build-*/
 **/CMakeFiles/
+
+# Datasets
+Integration/Datasets/*.wav
