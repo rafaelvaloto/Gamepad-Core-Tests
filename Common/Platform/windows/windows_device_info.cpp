@@ -319,7 +319,7 @@ void windows_device_info::configure_features(FDeviceContext* Context)
 				return;
 			}
 
-			DualShockCalibrationSensors(FeatureBuffer, Calibration, Context->ConnectionType);
+			DualShockCalibrationSensors(FeatureBuffer, Calibration, Context);
 		}
 		else
 		{
@@ -333,7 +333,7 @@ void windows_device_info::configure_features(FDeviceContext* Context)
 				return;
 			}
 
-			DualShockCalibrationSensors(FeatureBuffer, Calibration, Context->ConnectionType);
+			DualShockCalibrationSensors(FeatureBuffer, Calibration, Context);
 		}
 
 		Context->Calibration = Calibration;
@@ -349,7 +349,7 @@ void windows_device_info::configure_features(FDeviceContext* Context)
 			return;
 		}
 
-		DualSenseCalibrationSensors(FeatureBuffer, Calibration);
+		DualSenseCalibrationSensors(FeatureBuffer, Calibration, Context);
 		Context->Calibration = Calibration;
 	}
 }

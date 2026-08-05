@@ -85,7 +85,7 @@ bool linux_device_info::configure_features(FDeviceContext* Context)
 
 	using namespace FGamepadSensors;
 	FGamepadCalibration Calibration;
-	DualSenseCalibrationSensors(FeatureBuffer, Calibration);
+	DualSenseCalibrationSensors(FeatureBuffer, Calibration, Context);
 
 	Context->Calibration = Calibration;
 	return true;
